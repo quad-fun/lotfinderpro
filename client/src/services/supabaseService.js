@@ -75,6 +75,55 @@ export const getPropertyById = async (id) => {
   return data;
 };
 
+// NEW FUNCTION: Search properties by BBL
+export const searchPropertiesByBbl = async (bbl) => {
+  // Strip any formatting from BBL
+  const formattedBbl = String(bbl).replace(/[-\s]/g, '');
+  
+  const { data, error } = await supabase
+    .from('properties')
+    .select('*')
+    .eq('bbl', formattedBbl)
+    .limit(10);
+  
+  if (error) {
+    throw new Error(error.message);
+  }
+  
+  return data;
+};
+
+// NEW FUNCTION: Get boroughs and zoning districts
+export const getFilterOptions = async () => {
+  // Get distinct boroughs
+  const { data: boroughs, error: boroughError } = await supabase
+    .from('properties')
+    .select('borough')
+    .order('borough')
+    .limit(10);
+  
+  if (boroughError) {
+    throw new Error(boroughError.message);
+  }
+  
+  // Get distinct zoning districts
+  const { data: zoningDistricts, error: zoningError } = await supabase
+    .from('properties')
+    .select('zonedist1')
+    .not('zonedist1', 'is', null)
+    .order('zonedist1')
+    .limit(100);
+  
+  if (zoningError) {
+    throw new Error(zoningError.message);
+  }
+  
+  return {
+    boroughs: [...new Set(boroughs.map(b => b.borough))],
+    zoningDistricts: [...new Set(zoningDistricts.map(z => z.zonedist1))]
+  };
+};
+
 // Template Query Services
 export const getQueryTemplates = async () => {
   const { data, error } = await supabase
@@ -244,6 +293,82 @@ export const findOpportunities = async (opportunityTypeId, borough) => {
     data,
     opportunity: opportunityType
   };
+};
+
+// Dashboard Stats Services
+export const getDashboardStats = async () => {
+  try {
+    // Get total properties count
+    const { count: totalProperties, error: countError } = await supabase
+      .from('properties')
+      .select('*', { count: 'exact', head: true });
+    
+    if (countError) throw new Error(countError.message);
+    
+    // Get development opportunities count
+    const { count: developmentOpportunities, error: devOpError } = await supabase
+      .from('properties')
+      .select('*', { count: 'exact', head: true })
+      .eq('built_status', 'vacant')
+      .gt('lotarea', 2000);
+    
+    if (devOpError) throw new Error(devOpError.message);
+    
+    // Get vacant lots count
+    const { count: vacantLots, error: vacantError } = await supabase
+      .from('properties')
+      .select('*', { count: 'exact', head: true })
+      .eq('built_status', 'vacant');
+    
+    if (vacantError) throw new Error(vacantError.message);
+    
+    // Get NYC value ratio avg
+    const { data: valueRatioData, error: valueRatioError } = await supabase
+      .from('properties')
+      .select('assesstot, assessland')
+      .not('assesstot', 'is', null)
+      .not('assessland', 'is', null)
+      .gt('assesstot', 0)
+      .limit(1000);
+      
+    if (valueRatioError) throw new Error(valueRatioError.message);
+    
+    // Calculate average value ratio
+    const valueRatios = valueRatioData.map(p => p.assessland / p.assesstot).filter(v => !isNaN(v) && isFinite(v));
+    const valueRatioAvg = valueRatios.length ? 
+      (valueRatios.reduce((sum, val) => sum + val, 0) / valueRatios.length).toFixed(2) : 
+      '0.00';
+    
+    return [
+      {
+        title: 'Total Properties',
+        value: totalProperties.toLocaleString(),
+        icon: 'FaInfoCircle',
+        color: 'primary.main'
+      },
+      {
+        title: 'Development Opportunities',
+        value: developmentOpportunities.toLocaleString(),
+        icon: 'FaLightbulb',
+        color: 'success.main'
+      },
+      {
+        title: 'Vacant Lots',
+        value: vacantLots.toLocaleString(),
+        icon: 'FaInfoCircle',
+        color: 'warning.main'
+      },
+      {
+        title: 'NYC Value Ratio Avg',
+        value: valueRatioAvg,
+        icon: 'FaChartBar',
+        color: 'info.main'
+      }
+    ];
+  } catch (error) {
+    console.error('Error fetching dashboard stats:', error);
+    return [];
+  }
 };
 
 export default supabase;

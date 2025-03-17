@@ -7,11 +7,12 @@ import {
   MenuItem, 
   Grid,
   Typography,
-  Box
+  Box,
+  CircularProgress
 } from '@mui/material';
 import { FaSearch } from 'react-icons/fa';
 
-function QueryTemplateForm({ template, initialValues = {}, onSubmit }) {
+function QueryTemplateForm({ template, initialValues = {}, onSubmit, isLoading = false }) {
   const { register, handleSubmit, reset, formState: { errors } } = useForm({
     defaultValues: initialValues
   });
@@ -54,6 +55,7 @@ function QueryTemplateForm({ template, initialValues = {}, onSubmit }) {
                   required={isRequired}
                   error={!!errors[name]}
                   helperText={errors[name]?.message}
+                  disabled={isLoading}
                   {...register(name, { 
                     required: isRequired ? 'This field is required' : false
                   })}
@@ -77,6 +79,7 @@ function QueryTemplateForm({ template, initialValues = {}, onSubmit }) {
                   required={isRequired}
                   error={!!errors[name]}
                   helperText={errors[name]?.message}
+                  disabled={isLoading}
                   InputProps={{
                     endAdornment: schema.type === 'number' && 
                       schema.description?.includes('square feet') ? 
@@ -98,9 +101,10 @@ function QueryTemplateForm({ template, initialValues = {}, onSubmit }) {
           type="submit" 
           variant="contained" 
           color="primary"
-          startIcon={<FaSearch />}
+          startIcon={isLoading ? <CircularProgress size={20} color="inherit" /> : <FaSearch />}
+          disabled={isLoading}
         >
-          Search Properties
+          {isLoading ? 'Searching...' : 'Search Properties'}
         </Button>
       </Box>
     </form>

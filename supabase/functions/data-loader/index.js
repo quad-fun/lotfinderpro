@@ -156,71 +156,91 @@ async function handleFullLoad(supabaseAdmin) {
 }
 
 async function processRecords(supabaseAdmin, records) {
-  // Transform PLUTO data to match our schema
-  const transformedRecords = records.map(record => ({
-    bbl: parseInt(record.bbl, 10),
-    borough: getBoroughName(record.borough),
-    block: parseInt(record.block, 10),
-    lot: parseInt(record.lot, 10),
-    address: record.address,
-    zipcode: record.zipcode,
-    zonedist1: record.zonedist1,
-    bldgclass: record.bldgclass,
-    landuse: record.landuse,
-    ownertype: record.ownertype,
-    lotarea: parseFloat(record.lotarea),
-    bldgarea: parseFloat(record.bldgarea),
-    comarea: parseFloat(record.comarea),
-    resarea: parseFloat(record.resarea),
-    officearea: parseFloat(record.officearea),
-    retailarea: parseFloat(record.retailarea),
-    garagearea: parseFloat(record.garagearea),
-    strgearea: parseFloat(record.strgearea),
-    factryarea: parseFloat(record.factryarea),
-    numfloors: parseFloat(record.numfloors),
-    unitstotal: parseInt(record.unitstotal, 10),
-    unitsres: parseInt(record.unitsres, 10),
-    yearbuilt: parseInt(record.yearbuilt, 10),
-    yearalter1: parseInt(record.yearalter1, 10),
-    yearalter2: parseInt(record.yearalter2, 10),
-    builtfar: parseFloat(record.builtfar),
-    residfar: parseFloat(record.residfar),
-    commfar: parseFloat(record.commfar),
-    facilfar: parseFloat(record.facilfar),
-    assessland: parseFloat(record.assessland),
-    assesstot: parseFloat(record.assesstot),
-    exemptland: parseFloat(record.exemptland),
-    exempttot: parseFloat(record.exempttot),
-    landmark: record.landmark,
-    built_status: getBuiltStatus(record),
-    // Convert geometry from the API if available
-    geom: record.the_geom ? 
-          `SRID=4326;${record.the_geom.replace('MULTIPOLYGON', 'POLYGON')}` : 
-          null,
-    centroid: record.the_geom_centroid ? 
-             `SRID=4326;${record.the_geom_centroid}` : 
-             null
-  }));
-  
-  // Insert or update records in batches
-  const batchSize = 100;
-  for (let i = 0; i < transformedRecords.length; i += batchSize) {
-    const batch = transformedRecords.slice(i, i + batchSize);
+  try {
+    console.log(`Processing ${records.length} records...`);
     
-    const { error } = await supabaseAdmin
-      .from('properties')
-      .upsert(batch, { 
-        onConflict: 'bbl',
-        ignoreDuplicates: false
-      });
+    // Transform the PLUTO data format to our database schema
+    const transformedRecords = await Promise.all(records.map(async record => ({
+      bbl: parseInt(record.bbl, 10),
+      borough: await getBoroughName(record.borough, supabaseAdmin),
+      block: parseInt(record.block, 10),
+      lot: parseInt(record.lot, 10),
+      address: record.address,
+      zipcode: record.zipcode,
+      zonedist1: record.zonedist1,
+      bldgclass: record.bldgclass,
+      landuse: record.landuse,
+      ownertype: record.ownertype,
+      lotarea: parseFloat(record.lotarea),
+      bldgarea: parseFloat(record.bldgarea),
+      comarea: parseFloat(record.comarea),
+      resarea: parseFloat(record.resarea),
+      officearea: parseFloat(record.officearea),
+      retailarea: parseFloat(record.retailarea),
+      garagearea: parseFloat(record.garagearea),
+      strgearea: parseFloat(record.strgearea),
+      factryarea: parseFloat(record.factryarea),
+      numfloors: parseFloat(record.numfloors),
+      unitstotal: parseInt(record.unitstotal, 10),
+      unitsres: parseInt(record.unitsres, 10),
+      yearbuilt: parseInt(record.yearbuilt, 10),
+      yearalter1: parseInt(record.yearalter1, 10),
+      yearalter2: parseInt(record.yearalter2, 10),
+      builtfar: parseFloat(record.builtfar),
+      residfar: parseFloat(record.residfar),
+      commfar: parseFloat(record.commfar),
+      facilfar: parseFloat(record.facilfar),
+      assessland: parseFloat(record.assessland),
+      assesstot: parseFloat(record.assesstot),
+      exemptland: parseFloat(record.exemptland),
+      exempttot: parseFloat(record.exempttot),
+      landmark: record.landmark,
+      built_status: getBuiltStatus(record),
+      // Convert geometry from the API if available
+      geom: record.the_geom ? 
+            `SRID=4326;${record.the_geom.replace('MULTIPOLYGON', 'POLYGON')}` : 
+            null,
+      centroid: record.the_geom_centroid ? 
+               `SRID=4326;${record.the_geom_centroid}` : 
+               null
+    })));
     
-    if (error) {
-      throw new Error(`Failed to insert/update records: ${error.message}`);
+    // Insert or update records in batches
+    const batchSize = 100;
+    for (let i = 0; i < transformedRecords.length; i += batchSize) {
+      const batch = transformedRecords.slice(i, i + batchSize);
+      
+      const { error } = await supabaseAdmin
+        .from('properties')
+        .upsert(batch, { 
+          onConflict: 'bbl',
+          ignoreDuplicates: false
+        });
+      
+      if (error) {
+        throw new Error(`Failed to insert/update records: ${error.message}`);
+      }
     }
+  } catch (error) {
+    console.error('Error processing records:', error);
+    throw error;
   }
 }
 
-function getBoroughName(boroughCode) {
+async function getBoroughName(boroughCode, supabaseAdmin) {
+  // Try to get borough mapping from database first
+  const { data: boroughData, error } = await supabaseAdmin
+    .from('borough_mapping')
+    .select('name')
+    .eq('code', boroughCode)
+    .single();
+  
+  // If successful, use the database mapping
+  if (!error && boroughData) {
+    return boroughData.name;
+  }
+  
+  // Fallback to hardcoded mapping if database query fails
   const boroughMap = {
     '1': 'Manhattan',
     '2': 'Bronx',

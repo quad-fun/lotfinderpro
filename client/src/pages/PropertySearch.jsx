@@ -1,23 +1,34 @@
 // client/src/pages/PropertySearch.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { useForm } from 'react-hook-form';
+import { useLocation } from 'react-router-dom';
 import { Tab, Tabs, Box, Button, TextField, MenuItem, Typography, 
-         CircularProgress, Paper, Grid, Divider } from '@mui/material';
-import { FaSearch, FaMagic, FaFilter, FaSave } from 'react-icons/fa';
+         CircularProgress, Paper, Grid, Divider, InputAdornment } from '@mui/material';
+import { FaMagic, FaSearch, FaFilter, FaSave, FaMapMarkedAlt, FaTable } from 'react-icons/fa';
 
 // Custom components
 import PropertyTable from '../components/PropertyTable';
 import PropertyMap from '../components/PropertyMap';
 import QueryTemplateForm from '../components/QueryTemplateForm';
+import ExportMenu from '../components/ExportMenu';
 
 // Services
-import { getProperties, getQueryTemplates, executeTemplateQuery, executeNlpQuery } from '../services/supabaseService';
+import { 
+  getProperties, 
+  getQueryTemplates, 
+  executeTemplateQuery, 
+  executeNlpQuery,
+  getFilterOptions
+} from '../services/supabaseService';
 
 // Hooks
 import { useAuth } from '../contexts/AuthContext';
 
 function PropertySearch() {
+  const location = useLocation();
+  const searchParams = new URLSearchParams(location.search);
+  
   // State for tab control and view toggling
   const [tabValue, setTabValue] = useState(0);
   const [viewMode, setViewMode] = useState('table'); // 'table' or 'map'
@@ -32,20 +43,46 @@ function PropertySearch() {
   const [templateParameters, setTemplateParameters] = useState({});
   
   // NLP query state
-  const { register, handleSubmit } = useForm();
+  const { register, handleSubmit, setValue } = useForm();
   const [nlpQuery, setNlpQuery] = useState('');
+  
+  // Search loading state
+  const [isSearching, setIsSearching] = useState(false);
   
   // Auth context for user info
   const { user } = useAuth();
 
-  // Query for filter options (boroughs, zoning districts)
-  const { data: filterOptions } = useQuery('filterOptions', async () => {
-    // In a real app, these would be fetched from the database
-    return {
-      boroughs: ['Manhattan', 'Bronx', 'Brooklyn', 'Queens', 'Staten Island'],
-      zoningDistricts: ['R1-1', 'R2', 'R3-1', 'R3-2', 'R4', 'R5', 'R6', 'R7', 'R8', 'C1-6', 'C1-7', 'C2-6', 'C2-7', 'C4-4', 'C4-5', 'C4-6', 'C4-7', 'C5-1', 'C5-2', 'C5-3', 'C6-1', 'C6-2', 'C6-3', 'C6-4', 'C6-5', 'C6-6', 'C6-7', 'M1-1', 'M1-2', 'M1-3', 'M1-4', 'M1-5', 'M1-6', 'M2-1', 'M2-2', 'M2-3', 'M2-4', 'M3-1', 'M3-2']
-    };
-  });
+  // Process URL parameters on component mount
+  useEffect(() => {
+    // Get tab parameter if present
+    const tabParam = searchParams.get('tab');
+    if (tabParam !== null) {
+      setTabValue(parseInt(tabParam, 10));
+    }
+    
+    // Check for nlp parameter and query
+    const isNlpSearch = searchParams.get('nlp') === '1';
+    const queryParam = searchParams.get('query');
+    
+    if (isNlpSearch && queryParam) {
+      // Set the tab to NLP search (0)
+      setTabValue(0);
+      // Set the query value
+      setValue('nlpQuery', queryParam);
+      setNlpQuery(queryParam);
+      
+      // Automatically execute the search
+      setTimeout(() => {
+        executeNlpQuery(queryParam);
+      }, 500);
+    }
+  }, [location.search, setValue]);
+
+  // Query for filter options (boroughs, zoning districts) - using real data
+  const { data: filterOptions, isLoading: filterOptionsLoading } = useQuery(
+    'filterOptions',
+    getFilterOptions
+  );
   
   // Fetch query templates
   const { data: queryTemplates, isLoading: templatesLoading } = useQuery(
@@ -59,9 +96,52 @@ function PropertySearch() {
     setSearchResults(null); // Clear previous search results
   };
   
+  // Handle form submission for NLP search
+  const handleNlpSearch = async (data) => {
+    try {
+      setIsSearching(true);
+      const query = data.nlpQuery.trim();
+      setNlpQuery(query);
+      
+      await executeNlpQuery(query);
+    } catch (error) {
+      console.error('NLP search error:', error);
+      // Show error notification
+    } finally {
+      setIsSearching(false);
+    }
+  };
+  
+  // Execute NLP query function (separated for reuse)
+  const executeNlpQuery = async (query) => {
+    try {
+      setIsSearching(true);
+      
+      const result = await executeNlpQuery(
+        query,
+        user?.id // Pass user ID for saving if logged in
+      );
+      
+      setSearchResults({
+        data: result.results,
+        count: result.count,
+        searchType: 'nlp',
+        explanation: result.explanation,
+        sql: result.sql,
+        query
+      });
+    } catch (error) {
+      console.error('NLP search error:', error);
+      // Show error notification
+    } finally {
+      setIsSearching(false);
+    }
+  };
+  
   // Handle form submission for basic search
   const handleBasicSearch = async (data) => {
     try {
+      setIsSearching(true);
       const result = await getProperties({ 
         queryKey: [
           'properties', 
@@ -85,6 +165,8 @@ function PropertySearch() {
     } catch (error) {
       console.error('Search error:', error);
       // Show error notification - would use toast context in a complete app
+    } finally {
+      setIsSearching(false);
     }
   };
   
@@ -93,6 +175,7 @@ function PropertySearch() {
     if (!selectedTemplate) return;
     
     try {
+      setIsSearching(true);
       const result = await executeTemplateQuery({
         templateId: selectedTemplate.id,
         parameters
@@ -112,32 +195,15 @@ function PropertySearch() {
     } catch (error) {
       console.error('Template search error:', error);
       // Show error notification
+    } finally {
+      setIsSearching(false);
     }
   };
   
-  // Handle NLP search
-  const handleNlpSearch = async (data) => {
-    try {
-      const query = data.nlpQuery.trim();
-      setNlpQuery(query);
-      
-      const result = await executeNlpQuery(
-        query,
-        user?.id // Pass user ID for saving if logged in
-      );
-      
-      setSearchResults({
-        data: result.results,
-        count: result.count,
-        searchType: 'nlp',
-        explanation: result.explanation,
-        sql: result.sql,
-        query
-      });
-    } catch (error) {
-      console.error('NLP search error:', error);
-      // Show error notification
-    }
+  // Handle saving search
+  const handleSaveSearch = () => {
+    // This would open a modal to save the search in a complete app
+    console.log('Save search:', searchResults);
   };
   
   return (
@@ -149,17 +215,75 @@ function PropertySearch() {
       {/* Tab navigation for search types */}
       <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
         <Tabs value={tabValue} onChange={handleTabChange}>
-          <Tab label="Basic Search" icon={<FaFilter />} iconPosition="start" />
-          <Tab label="Template Search" icon={<FaSearch />} iconPosition="start" />
           <Tab label="Natural Language" icon={<FaMagic />} iconPosition="start" />
+          <Tab label="Filter Search" icon={<FaFilter />} iconPosition="start" />
+          <Tab label="Template Search" icon={<FaSearch />} iconPosition="start" />
         </Tabs>
       </Box>
       
       {/* Search forms */}
-      <Paper elevation={3} className="p-4 mb-6">
-        {/* Basic Search Tab */}
+      <Paper elevation={3} className="p-4 mb-6" sx={{ p: 3, mb: 4 }}>
+        {/* Natural Language Search Tab */}
         {tabValue === 0 && (
+          <form onSubmit={handleSubmit(handleNlpSearch)}>
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                Smart Property Search
+              </Typography>
+              <Typography variant="body1" color="text.secondary" gutterBottom>
+                Describe what you're looking for in plain English. Our AI will understand your request and find matching properties.
+              </Typography>
+            </Box>
+            
+            <TextField
+              label="Natural Language Query"
+              fullWidth
+              multiline
+              rows={3}
+              {...register('nlpQuery', { required: true })}
+              sx={{ mb: 3 }}
+              placeholder="Describe the properties you're looking for..."
+              defaultValue={nlpQuery}
+              InputProps={{
+                startAdornment: (
+                  <InputAdornment position="start" sx={{ mt: 1.5, ml: 0.5 }}>
+                    <FaMagic color="#4a148c" />
+                  </InputAdornment>
+                )
+              }}
+            />
+            
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="body2" color="text.secondary" gutterBottom>
+                Example queries:
+              </Typography>
+              <Box component="ul" sx={{ pl: 3 }}>
+                <li>Find vacant R3-2 lots over 5,000 square feet in Staten Island</li>
+                <li>Show me commercial properties built before 1950 with low improvement values</li>
+                <li>Which neighborhoods have the highest concentration of underbuilt residential lots?</li>
+                <li>Properties in Manhattan with an FAR below 5 and lot area over 2500 sqft</li>
+              </Box>
+            </Box>
+            
+            <Button 
+              type="submit" 
+              variant="contained" 
+              color="primary"
+              startIcon={<FaMagic />}
+              disabled={isSearching}
+              size="large"
+            >
+              {isSearching ? "Generating Results..." : "Find Properties with AI"}
+            </Button>
+          </form>
+        )}
+        
+        {/* Basic Filter Search Tab */}
+        {tabValue === 1 && (
           <form onSubmit={handleSubmit(handleBasicSearch)}>
+            <Typography variant="h6" gutterBottom>
+              Filter Properties
+            </Typography>
             <Grid container spacing={3}>
               <Grid item xs={12} md={4}>
                 <TextField
@@ -167,9 +291,10 @@ function PropertySearch() {
                   label="Borough"
                   fullWidth
                   {...register('borough')}
+                  disabled={filterOptionsLoading}
                 >
                   <MenuItem value="">All Boroughs</MenuItem>
-                  {filterOptions?.boroughs.map((borough) => (
+                  {filterOptions?.boroughs?.map((borough) => (
                     <MenuItem key={borough} value={borough}>
                       {borough}
                     </MenuItem>
@@ -183,9 +308,10 @@ function PropertySearch() {
                   label="Zoning District"
                   fullWidth
                   {...register('zonedist1')}
+                  disabled={filterOptionsLoading}
                 >
                   <MenuItem value="">All Zoning Districts</MenuItem>
-                  {filterOptions?.zoningDistricts.map((zone) => (
+                  {filterOptions?.zoningDistricts?.map((zone) => (
                     <MenuItem key={zone} value={zone}>
                       {zone}
                     </MenuItem>
@@ -238,8 +364,9 @@ function PropertySearch() {
                   variant="contained" 
                   color="primary"
                   startIcon={<FaSearch />}
+                  disabled={isSearching}
                 >
-                  Search Properties
+                  {isSearching ? "Searching..." : "Search Properties"}
                 </Button>
               </Grid>
             </Grid>
@@ -247,7 +374,7 @@ function PropertySearch() {
         )}
         
         {/* Template Search Tab */}
-        {tabValue === 1 && (
+        {tabValue === 2 && (
           <div>
             <Typography variant="h6" gutterBottom>
               Select a Query Template
@@ -290,48 +417,13 @@ function PropertySearch() {
                       template={selectedTemplate} 
                       initialValues={templateParameters}
                       onSubmit={handleTemplateSearch}
+                      isLoading={isSearching}
                     />
                   </Box>
                 )}
               </>
             )}
           </div>
-        )}
-        
-        {/* Natural Language Search Tab */}
-        {tabValue === 2 && (
-          <form onSubmit={handleSubmit(handleNlpSearch)}>
-            <Typography variant="body1" color="text.secondary" gutterBottom>
-              Describe what you're looking for in plain English. For example:
-            </Typography>
-            
-            <Box sx={{ mb: 2, pl: 2 }}>
-              <Typography variant="body2" component="ul">
-                <li>"Find vacant R3-2 lots over 5,000 square feet in Staten Island"</li>
-                <li>"Show me commercial properties built before 1950 with low improvement values"</li>
-                <li>"Which neighborhoods have the highest concentration of underbuilt residential lots?"</li>
-              </Typography>
-            </Box>
-            
-            <TextField
-              label="Natural Language Query"
-              fullWidth
-              multiline
-              rows={3}
-              {...register('nlpQuery', { required: true })}
-              sx={{ mb: 2 }}
-              placeholder="Describe the properties you're looking for..."
-            />
-            
-            <Button 
-              type="submit" 
-              variant="contained" 
-              color="primary"
-              startIcon={<FaMagic />}
-            >
-              Generate Results
-            </Button>
-          </form>
         )}
       </Paper>
       
@@ -348,16 +440,24 @@ function PropertySearch() {
               {/* View toggle buttons */}
               <Button
                 variant={viewMode === 'table' ? 'contained' : 'outlined'}
+                startIcon={<FaTable />}
                 onClick={() => setViewMode('table')}
               >
                 Table View
               </Button>
               <Button
                 variant={viewMode === 'map' ? 'contained' : 'outlined'}
+                startIcon={<FaMapMarkedAlt />}
                 onClick={() => setViewMode('map')}
               >
                 Map View
               </Button>
+              
+              {/* Export button */}
+              <ExportMenu 
+                properties={searchResults.data} 
+                disabled={isSearching} 
+              />
               
               {/* Save search button (if user is logged in) */}
               {user && (
@@ -365,13 +465,23 @@ function PropertySearch() {
                   variant="outlined"
                   color="secondary"
                   startIcon={<FaSave />}
-                  // This would open a modal to save the search in a complete app
+                  onClick={handleSaveSearch}
                 >
                   Save Search
                 </Button>
               )}
             </Box>
           </Box>
+          
+          {/* Display explanation for NLP queries */}
+          {searchResults.searchType === 'nlp' && searchResults.explanation && (
+            <Paper sx={{ p: 2, mb: 3, backgroundColor: '#f3e5f5', borderLeft: '4px solid #9c27b0' }}>
+              <Typography variant="subtitle2" gutterBottom fontWeight="bold">
+                How I understood your request:
+              </Typography>
+              <Typography variant="body1">{searchResults.explanation}</Typography>
+            </Paper>
+          )}
           
           {/* Display SQL for debugging/educational purposes */}
           {searchResults.sql && (
@@ -380,13 +490,6 @@ function PropertySearch() {
               <pre style={{ overflowX: 'auto' }}>
                 {searchResults.sql}
               </pre>
-              
-              {searchResults.explanation && (
-                <Box mt={2}>
-                  <Typography variant="subtitle2">Query Explanation:</Typography>
-                  <Typography variant="body2">{searchResults.explanation}</Typography>
-                </Box>
-              )}
             </Paper>
           )}
           
@@ -394,8 +497,8 @@ function PropertySearch() {
           {viewMode === 'table' ? (
             <PropertyTable 
               properties={searchResults.data}
-              page={searchResults.page}
-              pageSize={searchResults.pageSize}
+              page={searchResults.page || 0}
+              pageSize={searchResults.pageSize || 10}
               totalCount={searchResults.count}
               onPageChange={setCurrentPage}
               onPageSizeChange={setPageSize}
