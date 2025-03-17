@@ -1,0 +1,64 @@
+# Dependency directories
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Supabase specific
+supabase/migrations/
+supabase/volumes/
+supabase/.branches
+supabase/.temp
+
+# Logs
+logs
+*.log
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor directories and files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Build output
+dist/
+build/
+out/
+
+# Temporary files
+*.tmp
+*.bak
+
+# Supabase local development
+supabase/config.toml
+
+# Misc
+.pnp
+.pnp.js
+.vercel
+.next
+.nuxt
+.cache
+
+# Backup files
+*.bak
+*.gho
+*.ori
+*.orig
+*.tmp

@@ -1,25 +1,8 @@
-// client/src/App.jsx
+// src/App.js
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from 'react-query';
 import { createClient } from '@supabase/supabase-js';
-
-// Layout components
-import Layout from './components/Layout';
-
-// Pages
-import Dashboard from './pages/Dashboard';
-import PropertySearch from './pages/PropertySearch';
-import PropertyDetail from './pages/PropertyDetail';
-import SavedSearches from './pages/SavedSearches';
-import OpportunityFinder from './pages/OpportunityFinder';
-import Profile from './pages/Profile';
-import Login from './pages/Login';
-import Register from './pages/Register';
-
-// Context providers
-import { AuthProvider } from './contexts/AuthContext';
-import { ToastProvider } from './contexts/ToastContext';
 
 // Initialize Supabase client
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL;
@@ -39,24 +22,17 @@ const queryClient = new QueryClient({
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider supabase={supabase}>
-        <ToastProvider>
-          <Router>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route path="/register" element={<Register />} />
-              <Route path="/" element={<Layout />}>
-                <Route index element={<Dashboard />} />
-                <Route path="search" element={<PropertySearch />} />
-                <Route path="property/:id" element={<PropertyDetail />} />
-                <Route path="saved" element={<SavedSearches />} />
-                <Route path="opportunities" element={<OpportunityFinder />} />
-                <Route path="profile" element={<Profile />} />
-              </Route>
-            </Routes>
-          </Router>
-        </ToastProvider>
-      </AuthProvider>
+      <Router>
+        <div className="App">
+          <header className="App-header">
+            <h1>LotFinder Pro</h1>
+            <p>Property Analysis Tool for Real Estate Professionals</p>
+          </header>
+          <main>
+            <p>Welcome to LotFinder Pro! The application is being set up.</p>
+          </main>
+        </div>
+      </Router>
     </QueryClientProvider>
   );
 }
