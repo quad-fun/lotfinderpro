@@ -18,7 +18,7 @@ import {
   getProperties, 
   getQueryTemplates, 
   executeTemplateQuery, 
-  executeNlpQuery,
+  performNlpQuery as nlpQueryService,
   getFilterOptions
 } from '../services/supabaseService';
 
@@ -73,7 +73,7 @@ function PropertySearch() {
       
       // Automatically execute the search
       setTimeout(() => {
-        executeNlpQuery(queryParam);
+        performNlpQuery(queryParam);
       }, 500);
     }
   }, [location.search, setValue]);
@@ -103,7 +103,7 @@ function PropertySearch() {
       const query = data.nlpQuery.trim();
       setNlpQuery(query);
       
-      await executeNlpQuery(query);
+      await performNlpQuery(query);
     } catch (error) {
       console.error('NLP search error:', error);
       // Show error notification
@@ -113,21 +113,29 @@ function PropertySearch() {
   };
   
   // Execute NLP query function (separated for reuse)
-  const executeNlpQuery = async (query) => {
+  const performNlpQuery = async (query) => {
     try {
       setIsSearching(true);
       
-      const result = await executeNlpQuery(
+      // Use the renamed import
+      const result = await nlpQueryService(
         query,
         user?.id // Pass user ID for saving if logged in
       );
+  
+      console.log("NLP query response:", result);
+      
+      // Add defensive checks
+      if (!result) {
+        throw new Error("No response received from NLP query");
+      }
       
       setSearchResults({
-        data: result.results,
-        count: result.count,
+        data: result.results || [],
+        count: result.results?.length || 0,
         searchType: 'nlp',
-        explanation: result.explanation,
-        sql: result.sql,
+        explanation: result.explanation || "Search completed",
+        sql: result.sql || "",
         query
       });
     } catch (error) {
