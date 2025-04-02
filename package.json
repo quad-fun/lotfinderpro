@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "@mapbox/mapbox-sdk": "^0.16.1",
+    "@supabase/supabase-js": "^2.49.4",
+    "axios": "^1.8.4",
+    "bootstrap": "^5.3.3",
+    "dotenv": "^16.4.7",
+    "mapbox-gl": "^3.11.0",
+    "react-icons": "^5.5.0",
+    "sass": "^1.86.1"
+  },
+  "type": "module"
+}

@@ -7,7 +7,8 @@ import { Link } from 'react-router-dom';
 
 // You'll need to get a Mapbox API key and set it as an environment variable
 // This would be REACT_APP_MAPBOX_TOKEN in your .env file
-mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || '';
+mapboxgl.accessToken = process.env.REACT_APP_MAPBOX_TOKEN || 'fallback_token_for_dev';
+console.log("Mapbox token:", process.env.REACT_APP_MAPBOX_TOKEN);
 
 function PropertyMap({ properties }) {
   const mapContainer = useRef(null);
@@ -21,7 +22,7 @@ function PropertyMap({ properties }) {
       setLoading(false);
       return;
     }
-
+  
     // Initialize map if it doesn't exist yet
     if (!map.current) {
       try {
@@ -31,22 +32,27 @@ function PropertyMap({ properties }) {
           center: [-74.0060, 40.7128], // New York City coordinates
           zoom: 10
         });
-
+        
+        console.log("Map initialized successfully");
+  
         // Add navigation controls
         map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
-
+        
         // Handle map load
         map.current.on('load', () => {
+          console.log("Map loaded event fired");
           setLoading(false);
           addPropertiesToMap();
         });
-
+        
         // Handle map errors
         map.current.on('error', (e) => {
+          console.error("Map error details:", e);
           setMapError(`Map error: ${e.error.message}`);
           setLoading(false);
         });
       } catch (error) {
+        console.error("Failed to initialize map:", error);
         setMapError(`Failed to initialize map: ${error.message}`);
         setLoading(false);
       }
@@ -55,11 +61,11 @@ function PropertyMap({ properties }) {
       addPropertiesToMap();
       setLoading(false);
     }
-
+  
     // Cleanup on unmount
     return () => {
       if (map.current) {
-        // Clean up any specific resources if needed
+        // Optionally remove event listeners or other cleanup tasks here
       }
     };
   }, [properties]);

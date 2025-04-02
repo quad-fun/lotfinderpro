@@ -183,7 +183,7 @@ export const executeTemplateQuery = async ({ templateId, parameters }) => {
 };
 
 // NLP Query Service
-export const executeNlpQuery = async (query, userId) => {
+export const performNlpQuery = async (query, userId) => {
   const { data, error } = await supabase
     .functions.invoke('nlp-query', {
       body: { query, userId },
