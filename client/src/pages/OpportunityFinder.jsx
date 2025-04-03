@@ -1,5 +1,5 @@
 // client/src/pages/OpportunityFinder.jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery } from 'react-query';
 import { useLocation, useNavigate } from 'react-router-dom';
 import {
@@ -18,27 +18,35 @@ import {
   Divider,
   Alert,
   Tabs,
-  Tab
+  Tab,
+  Chip
 } from '@mui/material';
 import { 
   FaSearch, 
   FaMapMarkerAlt, 
   FaTable, 
-  FaInfoCircle
+  FaInfoCircle,
+  FaStar,
+  FaFilter
 } from 'react-icons/fa';
 
 // Import components and services
 import PropertyTable from '../components/PropertyTable';
 import PropertyMap from '../components/PropertyMap';
-import { getOpportunityTypes, findOpportunities } from '../services/supabaseService';
+import ExportMenu from '../components/ExportMenu';
+import { getOpportunityTypes, findOpportunities, saveFavoriteProperty } from '../services/supabaseService';
+import { useAuth } from '../contexts/AuthContext';
 
 function OpportunityFinder() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [viewMode, setViewMode] = useState('table');
   const [selectedType, setSelectedType] = useState('');
   const [borough, setBorough] = useState('');
+  const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState(null);
+  const [savedOpportunities, setSavedOpportunities] = useState({});
   
   // Get type ID from URL params if present
   const searchParams = new URLSearchParams(location.search);
@@ -51,9 +59,14 @@ function OpportunityFinder() {
   );
   
   // Set selected type from URL parameter
-  React.useEffect(() => {
+  useEffect(() => {
     if (typeParam && opportunityTypes) {
       setSelectedType(typeParam);
+      
+      // Auto-search if type is specified in URL
+      if (!results) {
+        handleSearch();
+      }
     }
   }, [typeParam, opportunityTypes]);
   
@@ -62,14 +75,40 @@ function OpportunityFinder() {
     if (!selectedType) return;
     
     try {
+      setIsSearching(true);
       const data = await findOpportunities(selectedType, borough || undefined);
       setResults(data);
     } catch (error) {
       console.error('Error finding opportunities:', error);
+    } finally {
+      setIsSearching(false);
     }
   };
   
-  // Render images for opportunity cards (in a real app, these would be actual images)
+  // Toggle favorite status
+  const toggleFavorite = async (propertyId) => {
+    if (!user) return;
+    
+    try {
+      // Optimistic UI update
+      setSavedOpportunities(prev => ({
+        ...prev,
+        [propertyId]: !prev[propertyId]
+      }));
+      
+      // Call API to save/unsave
+      await saveFavoriteProperty(user.id, propertyId);
+    } catch (error) {
+      console.error('Error toggling favorite:', error);
+      // Revert optimistic update on error
+      setSavedOpportunities(prev => ({
+        ...prev,
+        [propertyId]: !prev[propertyId]
+      }));
+    }
+  };
+  
+  // Render images for opportunity cards
   const getOpportunityImage = (name) => {
     const imageMap = {
       'Vacant Residential Lots': 'https://source.unsplash.com/random?vacant,lot',
@@ -79,6 +118,23 @@ function OpportunityFinder() {
     };
     
     return imageMap[name] || 'https://source.unsplash.com/random?realestate';
+  };
+  
+  // Format numbers for display
+  const formatNumber = (value) => {
+    if (!value && value !== 0) return 'N/A';
+    return new Intl.NumberFormat('en-US').format(value);
+  };
+  
+  // Format currency values
+  const formatCurrency = (value) => {
+    if (!value && value !== 0) return 'N/A';
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0
+    }).format(value);
   };
   
   return (
@@ -101,6 +157,7 @@ function OpportunityFinder() {
               fullWidth
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value)}
+              disabled={isSearching}
             >
               <MenuItem value="">Select an opportunity type</MenuItem>
               {opportunityTypes?.map((type) => (
@@ -118,6 +175,7 @@ function OpportunityFinder() {
               fullWidth
               value={borough}
               onChange={(e) => setBorough(e.target.value)}
+              disabled={isSearching}
             >
               <MenuItem value="">All Boroughs</MenuItem>
               <MenuItem value="Manhattan">Manhattan</MenuItem>
@@ -133,11 +191,11 @@ function OpportunityFinder() {
               variant="contained"
               color="primary"
               fullWidth
-              startIcon={<FaSearch />}
+              startIcon={isSearching ? <CircularProgress size={24} color="inherit" /> : <FaSearch />}
               onClick={handleSearch}
-              disabled={!selectedType}
+              disabled={!selectedType || isSearching}
             >
-              Find Opportunities
+              {isSearching ? "Searching..." : "Find Opportunities"}
             </Button>
           </Grid>
         </Grid>
@@ -228,6 +286,12 @@ function OpportunityFinder() {
                   >
                     Map
                   </Button>
+                  
+                  {/* Export menu for search results */}
+                  <ExportMenu 
+                    properties={results.data} 
+                    disabled={isSearching} 
+                  />
                 </Box>
               </Box>
               
@@ -246,9 +310,45 @@ function OpportunityFinder() {
                 
                 <Divider sx={{ my: 2 }} />
                 
-                <Typography variant="subtitle2" color="text.secondary">
-                  Search Criteria: {results.opportunity.criteria}
-                </Typography>
+                <Grid container spacing={3}>
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Search Criteria:
+                    </Typography>
+                    <Typography variant="body2" 
+                      sx={{ 
+                        backgroundColor: '#f5f5f5', 
+                        p: 1, 
+                        borderRadius: 1,
+                        fontFamily: 'monospace'
+                      }}
+                    >
+                      {results.opportunity.criteria}
+                    </Typography>
+                  </Grid>
+                  
+                  <Grid item xs={12} md={6}>
+                    <Typography variant="subtitle2" color="text.secondary">
+                      Key Metrics to Consider:
+                    </Typography>
+                    <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, mt: 1 }}>
+                      {results.opportunity.name.toLowerCase().includes('vacant') && (
+                        <Chip label="Lot Size" color="primary" variant="outlined" size="small" />
+                      )}
+                      {results.opportunity.name.toLowerCase().includes('underbuilt') && (
+                        <Chip label="FAR Utilization" color="primary" variant="outlined" size="small" />
+                      )}
+                      {results.opportunity.name.toLowerCase().includes('value') && (
+                        <Chip label="Land-to-Value Ratio" color="primary" variant="outlined" size="small" />
+                      )}
+                      {results.opportunity.name.toLowerCase().includes('development') && (
+                        <Chip label="Development Potential" color="primary" variant="outlined" size="small" />
+                      )}
+                      <Chip label="Assessment" color="primary" variant="outlined" size="small" />
+                      <Chip label="Zoning" color="primary" variant="outlined" size="small" />
+                    </Box>
+                  </Grid>
+                </Grid>
               </Paper>
               
               {/* Results Display */}
@@ -269,6 +369,50 @@ function OpportunityFinder() {
                 <Alert severity="info" sx={{ mt: 2 }}>
                   No properties found matching these criteria. Try adjusting your search parameters.
                 </Alert>
+              )}
+              
+              {/* Additional Insights Section */}
+              {results.data.length > 0 && (
+                <Paper elevation={2} sx={{ p: 3, mt: 3 }}>
+                  <Typography variant="h6" gutterBottom>
+                    Opportunity Insights
+                  </Typography>
+                  
+                  <Grid container spacing={3}>
+                    <Grid item xs={12} md={4}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Average Lot Size
+                      </Typography>
+                      <Typography variant="h5">
+                        {formatNumber(
+                          results.data.reduce((sum, p) => sum + (p.lotarea || 0), 0) / results.data.length
+                        )} sq ft
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Average Assessment
+                      </Typography>
+                      <Typography variant="h5">
+                        {formatCurrency(
+                          results.data.reduce((sum, p) => sum + (p.assesstot || 0), 0) / results.data.length
+                        )}
+                      </Typography>
+                    </Grid>
+                    
+                    <Grid item xs={12} md={4}>
+                      <Typography variant="subtitle2" gutterBottom>
+                        Average Development Potential
+                      </Typography>
+                      <Typography variant="h5">
+                        {formatNumber(
+                          results.data.reduce((sum, p) => sum + (p.development_potential || 0), 0) / results.data.length
+                        )} sq ft
+                      </Typography>
+                    </Grid>
+                  </Grid>
+                </Paper>
               )}
             </Box>
           )}
