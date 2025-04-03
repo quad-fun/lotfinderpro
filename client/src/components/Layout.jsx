@@ -25,7 +25,8 @@ import {
   FaStar,
   FaLightbulb,
   FaUser,
-  FaSignOutAlt
+  FaSignOutAlt,
+  FaBook
 } from 'react-icons/fa';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -65,6 +66,7 @@ function Layout() {
     { text: 'Property Search', path: '/search', icon: <FaSearch /> },
     { text: 'Saved Searches', path: '/saved', icon: <FaStar /> },
     { text: 'Opportunity Finder', path: '/opportunities', icon: <FaLightbulb /> },
+    { text: 'User Guide', path: '/guide', icon: <FaBook /> },
   ];
   
   // Check if a route is active
