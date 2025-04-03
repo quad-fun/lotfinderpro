@@ -16,7 +16,12 @@ import {
   TextField,
   Chip,
   InputAdornment,
-  IconButton
+  IconButton,
+  List,
+  ListItem,
+  ListItemIcon,
+  ListItemText,
+  ListItemButton
 } from '@mui/material';
 import {
   FaSearch,
@@ -25,7 +30,10 @@ import {
   FaInfoCircle,
   FaChartBar,
   FaMagic,
-  FaArrowRight
+  FaArrowRight,
+  FaBuilding,
+  FaMapMarkerAlt,
+  FaChartLine
 } from 'react-icons/fa';
 
 // Import custom components and services
@@ -46,6 +54,9 @@ const StatCard = ({ title, value, icon, color }) => {
       break;
     case 'FaChartBar':
       IconComponent = <FaChartBar size={20} />;
+      break;
+    case 'FaBuilding':
+      IconComponent = <FaBuilding size={20} />;
       break;
     default:
       IconComponent = <FaInfoCircle size={20} />;
@@ -206,6 +217,104 @@ function Dashboard() {
         )}
       </Grid>
       
+      {/* Featured Opportunities Section */}
+      <Typography variant="h5" component="h2" gutterBottom>
+        Development Opportunities
+      </Typography>
+      
+      {opTypesLoading ? (
+        <Box display="flex" justifyContent="center" p={3}>
+          <CircularProgress />
+        </Box>
+      ) : (
+        <Grid container spacing={3} sx={{ mb: 4 }}>
+          {/* Featured opportunity types in a horizontal layout */}
+          {opportunityTypes?.slice(0, 2).map((opportunity) => (
+            <Grid item xs={12} md={6} key={opportunity.id}>
+              <Paper sx={{ p: 0, overflow: 'hidden', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <Box
+                  sx={{
+                    height: 120,
+                    background: 'linear-gradient(45deg, #3f51b5 30%, #7986cb 90%)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    position: 'relative',
+                    overflow: 'hidden'
+                  }}
+                >
+                  {opportunity.name.includes('Vacant') && <FaMapMarkerAlt size={80} style={{ opacity: 0.2, position: 'absolute', right: 20 }} />}
+                  {opportunity.name.includes('Underbuilt') && <FaBuilding size={80} style={{ opacity: 0.2, position: 'absolute', right: 20 }} />}
+                  {opportunity.name.includes('Value') && <FaChartLine size={80} style={{ opacity: 0.2, position: 'absolute', right: 20 }} />}
+                  {opportunity.name.includes('Development') && <FaLightbulb size={80} style={{ opacity: 0.2, position: 'absolute', right: 20 }} />}
+                  
+                  <Box sx={{ p: 3, zIndex: 2 }}>
+                    <Typography variant="h5" component="h3" sx={{ fontWeight: 'bold' }}>
+                      {opportunity.name}
+                    </Typography>
+                  </Box>
+                </Box>
+                
+                <Box sx={{ p: 3, flexGrow: 1 }}>
+                  <Typography variant="body1" paragraph>
+                    {opportunity.description}
+                  </Typography>
+                  
+                  <Button 
+                    variant="contained" 
+                    color="primary"
+                    component={Link}
+                    to={`/opportunities?type=${opportunity.id}`}
+                    fullWidth
+                    endIcon={<FaArrowRight />}
+                  >
+                    Explore
+                  </Button>
+                </Box>
+              </Paper>
+            </Grid>
+          ))}
+          
+          {/* More opportunities list */}
+          <Grid item xs={12}>
+            <Paper sx={{ p: 3 }}>
+              <Typography variant="h6" gutterBottom>
+                More Opportunity Types
+              </Typography>
+              
+              <List>
+                {opportunityTypes?.slice(2).map((opportunity) => (
+                  <ListItem key={opportunity.id} disablePadding>
+                    <ListItemButton component={Link} to={`/opportunities?type=${opportunity.id}`}>
+                      <ListItemIcon>
+                        <FaLightbulb />
+                      </ListItemIcon>
+                      <ListItemText 
+                        primary={opportunity.name} 
+                        secondary={opportunity.description.substring(0, 100) + '...'}
+                      />
+                    </ListItemButton>
+                  </ListItem>
+                ))}
+              </List>
+              
+              <Box sx={{ mt: 2, textAlign: 'center' }}>
+                <Button 
+                  component={Link}
+                  to="/opportunities"
+                  variant="outlined"
+                  color="primary"
+                  endIcon={<FaArrowRight />}
+                >
+                  View All Opportunity Types
+                </Button>
+              </Box>
+            </Paper>
+          </Grid>
+        </Grid>
+      )}
+      
       {/* Quick Actions */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h5" component="h2" gutterBottom>
@@ -277,47 +386,6 @@ function Dashboard() {
             </Grid>
           )}
         </Grid>
-      </Box>
-      
-      {/* Common Opportunities */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h5" component="h2" gutterBottom>
-          Common Opportunities
-        </Typography>
-        
-        {opTypesLoading ? (
-          <Box display="flex" justifyContent="center" p={3}>
-            <CircularProgress />
-          </Box>
-        ) : (
-          <Grid container spacing={3}>
-            {opportunityTypes?.map((opportunity) => (
-              <Grid item xs={12} sm={6} md={3} key={opportunity.id}>
-                <Card sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-                  <CardContent sx={{ flexGrow: 1 }}>
-                    <Typography variant="h6" component="h3" gutterBottom>
-                      {opportunity.name}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {opportunity.description}
-                    </Typography>
-                  </CardContent>
-                  <Divider />
-                  <CardActions>
-                    <Button 
-                      component={Link} 
-                      to={`/opportunities?type=${opportunity.id}`}
-                      size="small"
-                      startIcon={<FaSearch />}
-                    >
-                      Find
-                    </Button>
-                  </CardActions>
-                </Card>
-              </Grid>
-            ))}
-          </Grid>
-        )}
       </Box>
     </Box>
   );
