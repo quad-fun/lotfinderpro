@@ -64,3 +64,4 @@ supabase/config.toml
 *.tmp
 
 pluto-loader/splits/
+notes

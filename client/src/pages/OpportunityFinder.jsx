@@ -34,6 +34,7 @@ import {
 import PropertyTable from '../components/PropertyTable';
 import PropertyMap from '../components/PropertyMap';
 import ExportMenu from '../components/ExportMenu';
+import OpportunityAnalytics from '../components/OpportunityAnalytics';
 import { getOpportunityTypes, findOpportunities, saveFavoriteProperty } from '../services/supabaseService';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -47,6 +48,7 @@ function OpportunityFinder() {
   const [isSearching, setIsSearching] = useState(false);
   const [results, setResults] = useState(null);
   const [savedOpportunities, setSavedOpportunities] = useState({});
+  const [error, setError] = useState(null);
   
   // Get type ID from URL params if present
   const searchParams = new URLSearchParams(location.search);
@@ -76,10 +78,12 @@ function OpportunityFinder() {
     
     try {
       setIsSearching(true);
+      setError(null); // Clear previous errors
       const data = await findOpportunities(selectedType, borough || undefined);
       setResults(data);
     } catch (error) {
       console.error('Error finding opportunities:', error);
+      setError(error.message);
     } finally {
       setIsSearching(false);
     }
@@ -178,11 +182,11 @@ function OpportunityFinder() {
               disabled={isSearching}
             >
               <MenuItem value="">All Boroughs</MenuItem>
-              <MenuItem value="Manhattan">Manhattan</MenuItem>
-              <MenuItem value="Brooklyn">Brooklyn</MenuItem>
-              <MenuItem value="Bronx">Bronx</MenuItem>
-              <MenuItem value="Queens">Queens</MenuItem>
-              <MenuItem value="Staten Island">Staten Island</MenuItem>
+              <MenuItem value="Manhattan">Manhattan (MN)</MenuItem>
+              <MenuItem value="Brooklyn">Brooklyn (BK)</MenuItem>
+              <MenuItem value="Bronx">Bronx (BX)</MenuItem>
+              <MenuItem value="Queens">Queens (QN)</MenuItem>
+              <MenuItem value="Staten Island">Staten Island (SI)</MenuItem>
             </TextField>
           </Grid>
           
@@ -200,6 +204,20 @@ function OpportunityFinder() {
           </Grid>
         </Grid>
       </Paper>
+      
+      {/* Error message */}
+      {error && (
+        <Alert 
+          severity="error" 
+          sx={{ mb: 3 }}
+          onClose={() => setError(null)}
+        >
+          {error.includes("timeout") || error.includes("canceling statement") ? 
+            "This search took too long to complete. Please try narrowing your search by selecting a specific borough, or try a different opportunity type." : 
+            error
+          }
+        </Alert>
+      )}
       
       {isLoading ? (
         <Box display="flex" justifyContent="center" my={4}>
@@ -350,7 +368,6 @@ function OpportunityFinder() {
                   </Grid>
                 </Grid>
               </Paper>
-              
               {/* Results Display */}
               {viewMode === 'table' ? (
                 <PropertyTable 
@@ -367,8 +384,34 @@ function OpportunityFinder() {
               
               {results.data.length === 0 && (
                 <Alert severity="info" sx={{ mt: 2 }}>
-                  No properties found matching these criteria. Try adjusting your search parameters.
+                  <Typography variant="subtitle2" gutterBottom>
+                    No properties found matching these criteria.
+                  </Typography>
+                  <Typography variant="body2">
+                    Try adjusting your search parameters or selecting a different borough.
+                  </Typography>
+                  {process.env.NODE_ENV === 'development' && (
+                    <Box sx={{ mt: 2 }}>
+                      <Typography variant="caption" sx={{ fontFamily: 'monospace' }}>
+                        Debug info: <br />
+                        Opportunity type: {results.opportunity.name} (ID: {results.opportunity.id})<br />
+                        Borough: {borough || "All"}<br />
+                        SQL: <pre style={{ whiteSpace: 'pre-wrap' }}>{results.sql}</pre>
+                      </Typography>
+                    </Box>
+                  )}
                 </Alert>
+              )}
+              
+              {/* Analytics Section */}
+              {results && results.data.length > 0 && (
+                <Box sx={{ mt: 3 }}>
+                  <OpportunityAnalytics 
+                    opportunity={results.opportunity}
+                    results={results}
+                    isLoading={isSearching}
+                  />
+                </Box>
               )}
               
               {/* Additional Insights Section */}

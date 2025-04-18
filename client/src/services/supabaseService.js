@@ -184,6 +184,7 @@ export const executeTemplateQuery = async ({ templateId, parameters }) => {
 
 // NLP Query Service
 export const performNlpQuery = async (query, userId) => {
+  // Using the Supabase Functions client method
   const { data, error } = await supabase
     .functions.invoke('nlp-query', {
       body: { query, userId },
@@ -270,8 +271,25 @@ export const findOpportunities = async (opportunityTypeId, borough) => {
     throw new Error(oppError.message);
   }
   
+  // Convert full borough name to code if needed
+  let boroughCode = borough;
+  if (borough) {
+    // Map full borough names to their codes
+    const boroughMap = {
+      'Manhattan': 'MN',
+      'Brooklyn': 'BK',
+      'Bronx': 'BX',
+      'Queens': 'QN',
+      'Staten Island': 'SI'
+    };
+    
+    // Check if we have a full name that needs conversion
+    if (boroughMap[borough]) {
+      boroughCode = boroughMap[borough];
+    }
+  }
+  
   // Construct SQL query with borough filter if provided
-  // Add LIMIT and performance optimizations to avoid timeout
   let sql = `
     SELECT p.id, p.bbl, p.borough, p.block, p.lot, p.address, p.zipcode, 
            p.zonedist1, p.bldgclass, p.landuse, p.lotarea, p.bldgarea, 
@@ -293,8 +311,9 @@ export const findOpportunities = async (opportunityTypeId, borough) => {
     WHERE ${opportunityType.criteria}
   `;
   
-  if (borough) {
-    sql += ` AND p.borough = '${borough.replace(/'/g, "''")}'`;
+  if (boroughCode) {
+    // Try both formats to cover either scenario
+    sql += ` AND (p.borough = '${boroughCode.replace(/'/g, "''")}' OR p.borough = '${borough.replace(/'/g, "''")}')`; 
   }
   
   // Add sorting based on opportunity type
@@ -341,7 +360,7 @@ export const findOpportunities = async (opportunityTypeId, borough) => {
                p.yearbuilt, p.built_status
         FROM properties p
         WHERE ${opportunityType.criteria.split(' AND ')[0]}
-        ${borough ? `AND p.borough = '${borough.replace(/'/g, "''")}'` : ''}
+        ${boroughCode ? `AND (p.borough = '${boroughCode.replace(/'/g, "''")}' OR p.borough = '${borough.replace(/'/g, "''")}')` : ''}
         LIMIT 30
       `;
       

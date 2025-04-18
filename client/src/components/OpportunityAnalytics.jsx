@@ -183,6 +183,17 @@ function OpportunityAnalytics({ opportunity, results, isLoading }) {
           </Box>
         </Grid>
         
+        {/* Analytics Section */}
+        {results && results.data.length > 0 && (
+          <Box sx={{ mt: 3 }}>
+            <OpportunityAnalytics 
+              opportunity={results.opportunity}
+              results={results}
+              isLoading={isSearching}
+            />
+          </Box>
+        )}
+
         {/* Lot Size Distribution */}
         <Grid item xs={12} md={6}>
           <Typography variant="subtitle2" gutterBottom>
