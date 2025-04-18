@@ -408,13 +408,23 @@ serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response(null, {
       headers: {
-        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Origin": "*", // This allows any domain to access the function
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey, X-Client-Info",
-        "Access-Control-Max-Age": "86400" // 24 hours
+        "Access-Control-Max-Age": "86400"
       }
     });
   }
+  
+  // Also update the success response to include CORS headers
+  return new Response(JSON.stringify({
+    // your response data
+  }), {
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*" // This allows any domain to access the function
+    }
+  });
   
   try {
     // Create Supabase client
