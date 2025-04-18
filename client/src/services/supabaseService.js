@@ -184,51 +184,19 @@ export const executeTemplateQuery = async ({ templateId, parameters }) => {
 
 // NLP Query Service - Updated for better error handling and direct fetch fallback
 export const performNlpQuery = async (query, userId) => {
-  try {
-    console.log("Attempting to call NLP query function with:", { 
-      query: query.substring(0, 50) + (query.length > 50 ? '...' : ''), 
-      hasUserId: !!userId 
-    });
-    
-    // First, try using the Supabase Functions client method
-    try {
-      const { data, error } = await supabase
-        .functions.invoke('nlp-query', {
-          body: { query, userId },
-        });
-      
-      if (error) {
-        console.error("Supabase functions.invoke error:", error);
-        throw new Error(error.message || "Error calling NLP query function");
-      }
-      
-      return data;
-    } catch (invokeError) {
-      console.warn("Invoke method failed, falling back to direct fetch:", invokeError);
-      
-      // Fallback to direct fetch method
-      const response = await fetch(`${supabaseUrl}/functions/v1/nlp-query`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${supabaseKey}`,
-          'apikey': supabaseKey
-        },
-        body: JSON.stringify({ query, userId })
-      });
-      
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`HTTP error ${response.status}:`, errorText);
-        throw new Error(`HTTP error ${response.status}: ${errorText || 'No error details available'}`);
-      }
-      
-      return await response.json();
-    }
-  } catch (error) {
-    console.error("NLP query error details:", error);
-    throw new Error(`Failed to send a request to the Edge Function: ${error.message}`);
+  console.log("Calling nlp‑query with:", { query, userId });
+
+  // this will automatically send your anon key in both apikey & Authorization headers
+  const { data, error } = await supabase
+    .functions
+    .invoke('nlp-query', { body: { query, userId } });
+
+  if (error) {
+    console.error("Supabase functions.invoke error:", error);
+    throw new Error(`NLP function failed: ${error.message}`);
   }
+
+  return data;
 };
 // Saved Searches Services
 export const getSavedSearches = async (userId) => {
