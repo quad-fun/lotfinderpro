@@ -182,22 +182,41 @@ export const executeTemplateQuery = async ({ templateId, parameters }) => {
   };
 };
 
-// NLP Query Service - Updated for better error handling and direct fetch fallback
+// NLP Query Service - Updated to use direct fetch
 export const performNlpQuery = async (query, userId) => {
-  console.log("Calling nlp‑query with:", { query, userId });
-
-  // this will automatically send your anon key in both apikey & Authorization headers
-  const { data, error } = await supabase
-    .functions
-    .invoke('nlp-query', { body: { query, userId } });
-
-  if (error) {
-    console.error("Supabase functions.invoke error:", error);
-    throw new Error(`NLP function failed: ${error.message}`);
+  try {
+    console.log("Calling nlp-query with direct fetch:", { 
+      query: query.substring(0, 50) + (query.length > 50 ? '...' : ''), 
+      hasUserId: !!userId 
+    });
+    
+    // Direct fetch to Edge Function
+    const response = await fetch(`${supabaseUrl}/functions/v1/nlp-query`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
+        // Include both authorization methods to be sure
+        'apikey': supabaseKey
+      },
+      body: JSON.stringify({ query, userId })
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`HTTP error ${response.status}:`, errorText);
+      throw new Error(`HTTP error ${response.status}: ${errorText || 'No response from Edge Function'}`);
+    }
+    
+    const data = await response.json();
+    console.log("Edge Function response:", data);
+    return data;
+  } catch (error) {
+    console.error("NLP query error details:", error);
+    throw new Error(`Failed to send a request to the Edge Function: ${error.message}`);
   }
-
-  return data;
 };
+
 // Saved Searches Services
 export const getSavedSearches = async (userId) => {
   const { data, error } = await supabase
