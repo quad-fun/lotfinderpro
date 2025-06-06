@@ -2,6 +2,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
+// CORS headers to use in all responses
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey, X-Client-Info",
+};
+
 // Function to translate natural language to SQL using Anthropic's Claude API
 async function translateNaturalLanguageToSQL(query: string) {
   const apiKey = Deno.env.get("CLAUDE_API_KEY");
@@ -79,6 +86,14 @@ Always include appropriate sorting (ORDER BY) when it makes sense:
 - For development opportunities, sort by development_potential
 - For inquiries about specific areas, prioritize larger or more valuable properties
 
+IMPORTANT: If the query mentions a zipcode, make sure to add a condition like:
+WHERE zipcode = '10024'
+And understand that zipcode is stored as TEXT, so always enclose it in single quotes.
+
+IMPORTANT: For residential zoning, make sure to use:
+WHERE zonedist1 LIKE 'R%'
+This will catch R1, R2, R3-2, etc.
+
 Your response should be JSON formatted with these fields:
 - sql: The SQL query to execute
 - explanation: A plain English explanation of how you interpreted the query
@@ -90,6 +105,7 @@ Make sure your SQL is valid PostgreSQL syntax.`;
 
   try {
     // Call Anthropic's Claude API
+    console.log("Calling Claude API with query:", query);
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -221,8 +237,29 @@ function fallbackTranslation(query: string, reason = "unknown") {
     zoningDistrict = zoningMatch[0].toUpperCase();
   }
   
+  // Extract zip code
+  const zipCodeMatch = query_lower.match(/zip\s*code\s*(\d{5})/i) || 
+                       query_lower.match(/zipcode\s*(\d{5})/i) ||
+                       query_lower.match(/in\s*(\d{5})/i);
+  
+  let zipCode = null;
+  if (zipCodeMatch) {
+    zipCode = zipCodeMatch[1];
+  }
+  
+  // Handle residential zoning queries
+  if (query_lower.includes("residential") && 
+     (query_lower.includes("zone") || query_lower.includes("zoning"))) {
+    sql = `SELECT * FROM properties WHERE zonedist1 LIKE 'R%'`;
+    explanation = "I found properties in residential zoning districts";
+    
+    if (zipCode) {
+      sql += ` AND zipcode = '${zipCode}'`;
+      explanation += ` in zip code ${zipCode}`;
+    }
+  }
   // Handle different property type queries
-  if (query_lower.includes("underdevelop") || 
+  else if (query_lower.includes("underdevelop") || 
       query_lower.includes("under-develop") || 
       query_lower.includes("underutilized") || 
       query_lower.includes("under-utilized") ||
@@ -310,9 +347,14 @@ function fallbackTranslation(query: string, reason = "unknown") {
     explanation = `I found properties with lot size greater than ${size.toLocaleString()} square feet.`;
     sql += " ORDER BY lotarea DESC";
   }
+  // Generic handler for zip code queries if no other patterns match
+  else if (zipCode) {
+    sql = `SELECT * FROM properties WHERE zipcode = '${zipCode}'`;
+    explanation = `I found properties in zip code ${zipCode}`;
+  }
   else {
     // Default query
-    sql = `SELECT * FROM properties`;
+    sql = `SELECT * FROM properties LIMIT 100`;
     explanation = "I performed a basic property search.";
     
     // Try to extract keywords
@@ -340,56 +382,12 @@ function fallbackTranslation(query: string, reason = "unknown") {
     explanation += ` in ${zoningDistrict} zoning districts`;
   }
   
-  // Add size filter if present
-  if (query_lower.includes("over") || 
-      query_lower.includes("more than") || 
-      query_lower.includes("larger than") || 
-      query_lower.includes("bigger than")) {
-    const sizeMatch = query.match(/(\d[\d,]*) sq(uare)? f(ee)?t/i) || 
-                      query.match(/(\d[\d,]*) sf/i) || 
-                      query.match(/(over|more than|larger than|bigger than) (\d[\d,]*)/i);
-    if (sizeMatch) {
-      const size = parseInt(sizeMatch[1]?.replace(/,/g, '') || sizeMatch[2]?.replace(/,/g, '') || '0');
-      if (size > 0) {
-        sql = sql.includes("WHERE") 
-          ? sql.replace("WHERE", `WHERE lotarea > ${size} AND`) 
-          : `${sql} WHERE lotarea > ${size}`;
-        explanation += ` I filtered for lots larger than ${size.toLocaleString()} square feet.`;
-      }
-    }
-  }
-  
-  // Add value filter if present
-  if (query_lower.includes("under") && 
-     (query_lower.includes("million") || query_lower.includes("$"))) {
-    const valueMatch = query.match(/under \$?(\d[\d,]*) million/i) || 
-                       query.match(/less than \$?(\d[\d,]*) million/i) ||
-                       query.match(/under \$?(\d[\d,]*)/i);
-    if (valueMatch) {
-      let value = parseInt(valueMatch[1].replace(/,/g, ''));
-      if (query_lower.includes("million")) {
-        value = value * 1000000;
-      } else {
-        value = value * 1; // ensure it's a number
-      }
-      
-      sql = sql.includes("WHERE") 
-        ? sql.replace("WHERE", `WHERE assesstot < ${value} AND`) 
-        : `${sql} WHERE assesstot < ${value}`;
-      explanation += ` I filtered for properties valued under $${(value/1000000).toFixed(1)} million.`;
-    }
-  }
-  
-  // Add year built filter if present
-  if (query_lower.includes("built after") || query_lower.includes("newer than")) {
-    const yearMatch = query.match(/(built after|newer than) (\d{4})/i);
-    if (yearMatch) {
-      const year = parseInt(yearMatch[2]);
-      sql = sql.includes("WHERE") 
-        ? sql.replace("WHERE", `WHERE yearbuilt > ${year} AND yearbuilt > 0 AND`) 
-        : `${sql} WHERE yearbuilt > ${year} AND yearbuilt > 0`;
-      explanation += ` I filtered for properties built after ${year}.`;
-    }
+  // Add zip code filter if present and not already added
+  if (zipCode && !sql.includes("zipcode =")) {
+    sql = sql.includes("WHERE") 
+      ? sql.replace("WHERE", `WHERE zipcode = '${zipCode}' AND`) 
+      : `${sql} WHERE zipcode = '${zipCode}'`;
+    explanation += ` in zip code ${zipCode}`;
   }
   
   // Add limit
@@ -404,68 +402,49 @@ function fallbackTranslation(query: string, reason = "unknown") {
 }
 
 serve(async (req) => {
-  // Handle CORS preflight requests
+  // Handle CORS preflight
   if (req.method === "OPTIONS") {
+    console.log("Handling CORS preflight request");
     return new Response(null, {
       headers: {
-        "Access-Control-Allow-Origin": "*", // This allows any domain to access the function
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey, X-Client-Info",
+        ...corsHeaders,
         "Access-Control-Max-Age": "86400"
       }
     });
   }
   
-  // Also update the success response to include CORS headers
-  return new Response(JSON.stringify({
-    // your response data
-  }), {
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*" // This allows any domain to access the function
-    }
-  });
-  
   try {
     // Create Supabase client
+    console.log("Creating Supabase client");
     const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
     const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
     const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
     
-    console.log("Supabase URL:", supabaseUrl ? "Present" : "Missing");
-    console.log("Supabase Key:", supabaseKey ? "Present" : "Missing");
-    console.log("Claude API Key:", claudeApiKey ? "Present" : "Missing");
+    console.log("Environment variables check:");
+    console.log("- Supabase URL:", supabaseUrl ? "Present" : "Missing");
+    console.log("- Supabase Key:", supabaseKey ? "Present" : "Missing");
+    console.log("- Claude API Key:", claudeApiKey ? "Present" : "Missing");
     
-    // Check if Authorization header exists and use it if available
-    const authHeader = req.headers.get('Authorization');
-    let apiKey = supabaseKey;
-    if (authHeader) {
-      const match = authHeader.match(/^Bearer (.+)$/);
-      if (match) {
-        apiKey = match[1];
-        console.log("Using API key from Authorization header");
-      }
-    }
-    
-    if (!supabaseUrl || !apiKey) {
+    if (!supabaseUrl || !supabaseKey) {
       return new Response(JSON.stringify({
         error: "Missing Supabase credentials"
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 500
       });
     }
     
-    const supabase = createClient(supabaseUrl, apiKey);
+    const supabase = createClient(supabaseUrl, supabaseKey);
     
     // Parse request
+    console.log("Parsing request body");
     let requestBody;
     try {
       requestBody = await req.json();
-      console.log("Request parsed successfully");
+      console.log("Request parsed successfully:", JSON.stringify(requestBody).substring(0, 200));
     } catch (parseError) {
       console.error("Error parsing request:", parseError.message);
       return new Response(JSON.stringify({
@@ -473,7 +452,7 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 400
       });
@@ -486,17 +465,18 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 400
       });
     }
     
     // Translate natural language to SQL
+    console.log("Translating query to SQL:", query);
     let translationResult;
     try {
       translationResult = await translateNaturalLanguageToSQL(query);
-      console.log("Translation result generated");
+      console.log("Translation result generated:", JSON.stringify(translationResult).substring(0, 200));
     } catch (translationError) {
       console.error("Translation error:", translationError.message);
       return new Response(JSON.stringify({
@@ -504,7 +484,7 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 500
       });
@@ -520,16 +500,16 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 400
       });
     }
     
     // Execute the query using the database function
+    console.log("Executing SQL:", sql);
     let queryResult;
     try {
-      console.log("Executing SQL:", sql);
       queryResult = await supabase.rpc('execute_dynamic_query', {
         query_sql: sql
       });
@@ -538,7 +518,7 @@ serve(async (req) => {
       if (queryResult.error) {
         console.error("Query execution error:", queryResult.error.message);
       } else {
-        console.log("Data received from database function");
+        console.log("Data received from database function, count:", queryResult.data?.length || 0);
       }
     } catch (queryError) {
       console.error("RPC execution error:", queryError.message);
@@ -548,7 +528,7 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 500
       });
@@ -562,7 +542,7 @@ serve(async (req) => {
       }), {
         headers: {
           "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*"
+          ...corsHeaders
         },
         status: 500
       });
@@ -571,6 +551,7 @@ serve(async (req) => {
     // Save search if user is logged in
     if (userId) {
       try {
+        console.log("Saving search for user:", userId);
         const saveResult = await supabase.from('saved_searches').insert({
           user_id: userId,
           name: query.substring(0, 50) + (query.length > 50 ? '...' : ''),
@@ -587,6 +568,7 @@ serve(async (req) => {
       }
     }
     
+    console.log("Successfully completed request. Returning results.");
     return new Response(JSON.stringify({
       results: data || [],
       count: Array.isArray(data) ? data.length : 0,
@@ -595,7 +577,7 @@ serve(async (req) => {
     }), {
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
+        ...corsHeaders
       }
     });
     
@@ -606,7 +588,7 @@ serve(async (req) => {
     }), {
       headers: {
         "Content-Type": "application/json",
-        "Access-Control-Allow-Origin": "*"
+        ...corsHeaders
       },
       status: 500
     });
