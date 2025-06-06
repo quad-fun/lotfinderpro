@@ -1,30 +1,20 @@
-// supabase/functions/nlp-query/index.ts
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+// supabase/functions/nlp-query/index.ts - Performance optimized version
 
-// CORS headers to use in all responses
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, x-client-info, apikey, X-Client-Info",
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Function to translate natural language to SQL using Anthropic's Claude API
-async function translateNaturalLanguageToSQL(query: string) {
-  const apiKey = Deno.env.get("CLAUDE_API_KEY");
-  console.log("Claude API Key present:", !!apiKey);
-  
-  if (!apiKey) {
-    console.error("Missing CLAUDE_API_KEY environment variable");
-    // Fall back to rule-based approach if API key is missing
-    return fallbackTranslation(query, "missing API key");
-  }
-
-  const systemPrompt = `You are an AI that converts natural language queries about real estate properties into SQL queries.
+const systemPrompt = `You are an AI that converts natural language queries about real estate properties into SQL queries.
 
 Your task is to translate a user's question about properties into a valid SQL query that can be run against a PostgreSQL database.
 
 The main table is called "properties" and has the following key columns:
+- id: Primary key
 - bbl: Borough, Block, and Lot identifier (unique)
 - borough: Borough code (MN = Manhattan, BX = Bronx, BK = Brooklyn, QN = Queens, SI = Staten Island)
 - block: Tax block number
@@ -32,183 +22,88 @@ The main table is called "properties" and has the following key columns:
 - address: Street address
 - zipcode: ZIP code
 - zonedist1: Primary zoning district (e.g. R3-2, C1-9, M1-1)
-- bldgclass: Building class code
-- landuse: Land use category
+- bldgclass: Building class code (V* = vacant land, A* = single family, etc.)
+- landuse: Land use category (11 = vacant land)
 - lotarea: Lot area in square feet
 - bldgarea: Building area in square feet
 - comarea: Commercial area
 - resarea: Residential area
 - numfloors: Number of floors
+- numbldgs: Number of buildings
 - unitstotal: Total units
 - unitsres: Residential units
 - yearbuilt: Year built
 - builtfar: Built Floor Area Ratio (current FAR)
-- residfar: Maximum allowed residential FAR (maximum FAR allowed by zoning)
+- residfar: Maximum allowed residential FAR
 - commfar: Maximum allowed commercial FAR
 - assessland: Assessed land value
 - assesstot: Total assessed value (land + improvements)
-- built_status: Either 'built' or 'vacant'
-- development_potential: Calculated as (residfar - builtfar) * lotarea
+- built_status: Either 'built' or 'vacant' (computed field, may be unreliable)
+- development_potential: Pre-calculated as (residfar - builtfar) * lotarea
+- value_ratio: Pre-calculated as assessland / assesstot
+- is_vacant: Boolean computed field for vacant lots
 
-IMPORTANT: Always use the correct borough codes when filtering by location:
-- For "in Manhattan", add WHERE borough = 'MN'
-- For "in Brooklyn", add WHERE borough = 'BK'
-- For "in the Bronx" or "in Bronx", add WHERE borough = 'BX'
-- For "in Queens", add WHERE borough = 'QN'
-- For "in Staten Island", add WHERE borough = 'SI'
+IMPORTANT BOROUGH CODES:
+- For "in Manhattan", use WHERE borough = 'MN'
+- For "in Brooklyn", use WHERE borough = 'BK'
+- For "in the Bronx" or "in Bronx", use WHERE borough = 'BX'
+- For "in Queens", use WHERE borough = 'QN'
+- For "in Staten Island", use WHERE borough = 'SI'
 
-IMPORTANT: When filtering properties based on builtfar or development_potential, be aware that some properties might have NULL values for these fields. Consider using IS NULL conditions appropriately.
+VACANT LOT IDENTIFICATION (IMPORTANT - USE THESE INSTEAD OF built_status):
+For vacant lots, use these criteria in priority order:
+1. BEST: Building class starts with 'V' → WHERE bldgclass LIKE 'V%'
+2. GOOD: Land use category 11 → WHERE landuse = '11'
+3. OK: Use computed field → WHERE is_vacant = true
+4. FALLBACK: No buildings → WHERE (yearbuilt IS NULL OR yearbuilt = 0) AND (bldgarea IS NULL OR bldgarea = 0)
 
-For example, instead of just:
-WHERE builtfar < residfar * 0.5
+NEVER use "built_status = 'vacant'" as the primary method - it's unreliable!
 
-Consider using:
-WHERE (builtfar IS NULL OR builtfar < residfar * 0.5)
+PERFORMANCE OPTIMIZATION RULES:
+1. ALWAYS use the pre-calculated development_potential column instead of calculating (residfar - builtfar) * lotarea
+2. ALWAYS use the pre-calculated value_ratio column instead of calculating assessland / assesstot
+3. Use indexed columns for WHERE clauses: borough, bldgclass, zonedist1, landuse
+4. Avoid complex calculations in ORDER BY - use pre-calculated columns
+5. Always include LIMIT to prevent timeouts (default 50, max 100)
+6. For air rights queries, use: WHERE development_potential > 0 ORDER BY development_potential DESC
+7. For value-based sorting, use: ORDER BY assesstot DESC or ORDER BY value_ratio DESC
 
-This will include properties that might be vacant or have no recorded building information.
+COLUMN SELECTION - Use efficient subset:
+For performance, select only needed columns:
+SELECT id, bbl, borough, block, lot, address, zipcode, zonedist1, bldgclass, 
+       lotarea, bldgarea, builtfar, residfar, assessland, assesstot,
+       yearbuilt, development_potential, value_ratio
 
-For property value concepts:
-- "High value ratio" or "land value ratio" refers to properties where assessland/assesstot is high (> 0.7)
-- "Value per square foot" is calculated as assesstot/lotarea
+OPTIMIZED QUERY PATTERNS:
 
-For zoning and development concepts:
-- "Underdeveloped" or "underutilized" properties: WHERE (builtfar IS NULL OR builtfar < residfar * 0.5) AND residfar > 0
-- "Development potential": WHERE development_potential > 0 ORDER BY development_potential DESC
-- "Zoning efficiency": properties using a low percentage of their maximum allowed FAR
-- "Air rights": properties with unused development rights (residfar > builtfar)
+For development opportunities:
+WHERE development_potential > 0 AND borough = 'BX' ORDER BY development_potential DESC LIMIT 50
 
-For mixed-use queries, combine appropriate conditions:
-- "Residential properties in Brooklyn with development potential": 
-  WHERE borough = 'BK' AND (bldgclass LIKE 'A%' OR bldgclass LIKE 'B%' OR bldgclass LIKE 'C%' OR bldgclass LIKE 'D%') AND development_potential > 0
+For high value properties:
+WHERE value_ratio > 0.7 AND borough = 'BX' ORDER BY assesstot DESC LIMIT 50
 
-Always include appropriate sorting (ORDER BY) when it makes sense:
-- For investment properties, sort by value metrics
-- For development opportunities, sort by development_potential
-- For inquiries about specific areas, prioritize larger or more valuable properties
+For air rights transfer opportunities:
+WHERE development_potential > 10000 AND residfar > 0 ORDER BY development_potential DESC LIMIT 50
 
-IMPORTANT: If the query mentions a zipcode, make sure to add a condition like:
-WHERE zipcode = '10024'
-And understand that zipcode is stored as TEXT, so always enclose it in single quotes.
+For underutilized properties:
+WHERE builtfar IS NOT NULL AND residfar > 0 AND builtfar < residfar * 0.5 ORDER BY development_potential DESC LIMIT 50
 
-IMPORTANT: For residential zoning, make sure to use:
-WHERE zonedist1 LIKE 'R%'
-This will catch R1, R2, R3-2, etc.
+ZONING PATTERNS:
+- R* = Residential (R1-R10)
+- C* = Commercial (C1-C8)
+- M* = Manufacturing (M1-M3)
 
 Your response should be JSON formatted with these fields:
 - sql: The SQL query to execute
 - explanation: A plain English explanation of how you interpreted the query
 
-Always limit results to 100 records maximum to prevent performance issues.
-Make sure your SQL is valid PostgreSQL syntax.`;
+Example for "Find properties in the Bronx with unused air rights":
+{
+  "sql": "SELECT id, bbl, borough, block, lot, address, zipcode, zonedist1, bldgclass, lotarea, bldgarea, builtfar, residfar, assessland, assesstot, yearbuilt, development_potential, value_ratio FROM properties WHERE borough = 'BX' AND development_potential > 0 ORDER BY development_potential DESC LIMIT 50",
+  "explanation": "I searched for properties in the Bronx (borough code BX) with unused development rights by filtering for positive development potential values, sorted by the amount of unused development potential from highest to lowest."
+}`;
 
-  const userMessage = `Convert this natural language query about properties to SQL: "${query}"`;
-
-  try {
-    // Call Anthropic's Claude API
-    console.log("Calling Claude API with query:", query);
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01"
-      },
-      body: JSON.stringify({
-        model: "claude-3-sonnet-20240229",
-        max_tokens: 1000,
-        system: systemPrompt,
-        messages: [
-          { role: "user", content: userMessage }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Anthropic API error:", errorText);
-      throw new Error(`Anthropic API error: ${response.status} ${response.statusText}`);
-    }
-
-    const result = await response.json();
-    console.log("Claude response received");
-
-    // Extract the JSON response from Claude
-    try {
-      // Claude sometimes adds markdown formatting, so we need to extract just the JSON part
-      const content = result.content[0].text;
-      
-      // Log the full content for debugging
-      console.log("Claude raw response:", content);
-      
-      // Try to extract JSON from the response with multiple patterns
-      const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/) || 
-                        content.match(/```\n([\s\S]*?)\n```/) || 
-                        content.match(/{[\s\S]*?}/);
-                        
-      let jsonStr = jsonMatch ? (jsonMatch[1] || jsonMatch[0]) : content;
-      
-      // Clean up any remaining markdown or text
-      if (jsonStr.startsWith('```')) {
-        jsonStr = jsonStr.replace(/```json\n|```\n|```/g, '');
-      }
-      
-      // Add fallback values in case parsing still fails
-      let parsedResult;
-      try {
-        parsedResult = JSON.parse(jsonStr);
-      } catch (innerParseError) {
-        console.error("JSON parse error, trying to extract manually:", innerParseError);
-        
-        // Try to manually extract SQL and explanation with regex
-        const sqlMatch = content.match(/sql['"]*:\s*['"]([\s\S]*?)['"],/i) || 
-                         content.match(/sql['"]*:\s*['"]([\s\S]*?)['"]}/i);
-        const explanationMatch = content.match(/explanation['"]*:\s*['"]([\s\S]*?)['"]/i);
-        
-        if (sqlMatch && explanationMatch) {
-          parsedResult = {
-            sql: sqlMatch[1],
-            explanation: explanationMatch[1]
-          };
-        } else {
-          throw new Error("Could not extract SQL and explanation from response");
-        }
-      }
-      
-      // Validate the result has the expected structure
-      if (!parsedResult.sql) {
-        throw new Error("Response missing SQL field");
-      }
-      
-      if (!parsedResult.explanation) {
-        parsedResult.explanation = "I analyzed your query about properties and created a database search.";
-      }
-      
-      return parsedResult;
-    } catch (parseError) {
-      console.error("Error parsing Claude response:", parseError);
-      // Fallback to a simple query if parsing fails
-      return fallbackTranslation(query, "parsing error: " + parseError.message);
-    }
-  } catch (error) {
-    console.error("Error calling Claude API:", error);
-    // Fallback to the rule-based approach as a backup
-    return fallbackTranslation(query, "API call error: " + error.message);
-  }
-}
-
-// Helper function to get borough name from code
-function getBoroughName(code) {
-  const boroughMap = {
-    'MN': 'Manhattan',
-    'BX': 'Bronx',
-    'BK': 'Brooklyn',
-    'QN': 'Queens',
-    'SI': 'Staten Island'
-  };
-  return boroughMap[code] || code;
-}
-
-// Enhanced rule-based fallback function
+// Optimized fallback function with performance focus
 function fallbackTranslation(query: string, reason = "unknown") {
   console.log(`Using fallback translation for query: "${query}". Reason: ${reason}`);
   
@@ -216,7 +111,13 @@ function fallbackTranslation(query: string, reason = "unknown") {
   let sql = "";
   let explanation = "";
   
-  // Extract potential borough using correct borough codes
+  // Base SELECT with essential columns (avoiding potential NULL issues)
+  const baseSelect = `SELECT id, bbl, borough, block, lot, address, zipcode, zonedist1, bldgclass, 
+       lotarea, bldgarea, builtfar, residfar, assessland, assesstot,
+       yearbuilt, development_potential, 
+       CASE WHEN assesstot > 0 THEN assessland / assesstot ELSE NULL END as value_ratio`;
+  
+  // Extract potential borough
   let borough = null;
   if (query_lower.includes("manhattan")) {
     borough = "MN";
@@ -230,140 +131,56 @@ function fallbackTranslation(query: string, reason = "unknown") {
     borough = "SI";
   }
   
-  // Extract potential zoning districts
-  let zoningDistrict = null;
-  const zoningMatch = query_lower.match(/r\d-?\d?|c\d-?\d?|m\d-?\d?/i);
-  if (zoningMatch) {
-    zoningDistrict = zoningMatch[0].toUpperCase();
-  }
-  
-  // Extract zip code
-  const zipCodeMatch = query_lower.match(/zip\s*code\s*(\d{5})/i) || 
-                       query_lower.match(/zipcode\s*(\d{5})/i) ||
-                       query_lower.match(/in\s*(\d{5})/i);
-  
-  let zipCode = null;
-  if (zipCodeMatch) {
-    zipCode = zipCodeMatch[1];
-  }
-  
-  // Handle residential zoning queries
-  if (query_lower.includes("residential") && 
-     (query_lower.includes("zone") || query_lower.includes("zoning"))) {
-    sql = `SELECT * FROM properties WHERE zonedist1 LIKE 'R%'`;
-    explanation = "I found properties in residential zoning districts";
+  // Handle air rights / development potential queries
+  if (query_lower.includes("air rights") || query_lower.includes("unused") || 
+      query_lower.includes("development potential") || query_lower.includes("underutilized")) {
     
-    if (zipCode) {
-      sql += ` AND zipcode = '${zipCode}'`;
-      explanation += ` in zip code ${zipCode}`;
+    // More robust approach - check for development potential OR manual calculation
+    sql = `${baseSelect} FROM properties WHERE (
+      (development_potential IS NOT NULL AND development_potential > 0) OR 
+      (residfar IS NOT NULL AND builtfar IS NOT NULL AND residfar > builtfar) OR
+      (residfar IS NOT NULL AND builtfar IS NULL AND residfar > 0)
+    )`;
+    explanation = "I searched for properties with unused development rights, checking both pre-calculated development potential and manual FAR comparisons.";
+    
+    // Add minimum threshold for significant opportunities
+    if (query_lower.includes("significant") || query_lower.includes("major")) {
+      sql = sql.replace("development_potential > 0", "development_potential > 50000");
+      explanation += " I filtered for significant development opportunities with substantial unused potential.";
     }
-  }
-  // Handle different property type queries
-  else if (query_lower.includes("underdevelop") || 
-      query_lower.includes("under-develop") || 
-      query_lower.includes("underutilized") || 
-      query_lower.includes("under-utilized") ||
-      query_lower.includes("development potential")) {
-    sql = `SELECT * FROM properties 
-           WHERE (builtfar IS NULL OR builtfar < residfar * 0.8) 
-           AND residfar > 0`;
-    explanation = "I found properties that are underdeveloped (with significant development potential).";
     
-    // Sort by development potential
-    sql += " ORDER BY development_potential DESC";
+    sql += " ORDER BY COALESCE(development_potential, (residfar - COALESCE(builtfar, 0)) * lotarea) DESC";
   }
+  // Handle vacant lot queries
   else if (query_lower.includes("vacant") && query_lower.includes("lot")) {
-    sql = `SELECT * FROM properties WHERE built_status = 'vacant'`;
-    explanation = "I found properties that are vacant lots.";
-  }
-  else if (query_lower.includes("commercial") && 
-          (query_lower.includes("property") || query_lower.includes("building") || query_lower.includes("properties"))) {
-    sql = `SELECT * FROM properties WHERE 
-          (bldgclass LIKE 'G%' OR bldgclass LIKE 'O%' OR bldgclass LIKE 'K%') 
-          AND built_status = 'built'`;
-    explanation = "I found commercial properties.";
+    sql = `${baseSelect} FROM properties WHERE bldgclass LIKE 'V%'`;
+    explanation = "I found vacant lots using the official NYC building class V* designation for vacant land.";
     
-    if (query_lower.includes("value") && (query_lower.includes("high") || query_lower.includes("valuable"))) {
-      sql += " ORDER BY assesstot DESC";
-      explanation += " I sorted by highest total value.";
-    }
-  }
-  else if (query_lower.includes("residential") && 
-          (query_lower.includes("property") || query_lower.includes("building") || query_lower.includes("properties"))) {
-    sql = `SELECT * FROM properties WHERE 
-          (bldgclass LIKE 'A%' OR bldgclass LIKE 'B%' OR bldgclass LIKE 'C%' OR bldgclass LIKE 'D%') 
-          AND built_status = 'built'`;
-    explanation = "I found residential properties.";
-    
-    // Handle specific residential property queries
-    if (query_lower.includes("multi-family") || query_lower.includes("multifamily") || 
-        query_lower.includes("multi family") || query_lower.includes("apartment")) {
-      sql = sql.replace("bldgclass LIKE 'A%' OR ", ""); // Remove single family
-      explanation = "I found multi-family residential properties.";
-    }
-    else if (query_lower.includes("single family") || query_lower.includes("one family") || 
-             query_lower.includes("single-family") || query_lower.includes("one-family")) {
-      sql = `SELECT * FROM properties WHERE bldgclass LIKE 'A%' AND built_status = 'built'`;
-      explanation = "I found single-family residential properties.";
-    }
-  }
-  else if (query_lower.includes("mixed use") || query_lower.includes("mixed-use")) {
-    sql = `SELECT * FROM properties WHERE bldgclass LIKE 'R%' OR landuse = '04'`;
-    explanation = "I found mixed-use (residential and commercial) properties.";
-  }
-  else if (query_lower.includes("high") && query_lower.includes("value") && query_lower.includes("ratio")) {
-    sql = `SELECT * FROM properties WHERE value_ratio > 0.7 AND assesstot > 0`;
-    explanation = "I found properties with a high land-to-total value ratio (over 70%).";
-    sql += " ORDER BY value_ratio DESC";
-  }
-  else if (query_lower.includes("air rights") || 
-           query_lower.includes("development rights") || 
-           query_lower.includes("transfer")) {
-    sql = `SELECT * FROM properties WHERE residfar > builtfar * 1.5 AND builtfar > 0 AND residfar > 0`;
-    explanation = "I found properties with significant unused development rights (air rights).";
-    sql += " ORDER BY (residfar - builtfar) * lotarea DESC";
-  }
-  else if (query_lower.includes("old") || query_lower.includes("historic")) {
-    let year = 1950; // Default
-    const yearMatch = query_lower.match(/before (\d{4})/);
-    if (yearMatch) {
-      year = parseInt(yearMatch[1]);
-    } else if (query_lower.includes("pre-war") || query_lower.includes("prewar")) {
-      year = 1945;
-    }
-    
-    sql = `SELECT * FROM properties WHERE yearbuilt < ${year} AND yearbuilt > 0 AND built_status = 'built'`;
-    explanation = `I found properties built before ${year}.`;
-  }
-  else if (query_lower.includes("large") && query_lower.includes("lot")) {
-    let size = 5000; // Default square feet
-    const sizeMatch = query_lower.match(/(\d[\d,]*) sq(uare)? f(ee)?t/i) || 
-                      query_lower.match(/(\d[\d,]*) sf/i);
+    // Add size filter if present
+    const sizeMatch = query.match(/(\d[\d,]*) sq(uare)? f(ee)?t/i) || 
+                      query.match(/(\d[\d,]*) sqft/i) ||
+                      query.match(/(over|more than|larger than|bigger than) (\d[\d,]*)/i);
     if (sizeMatch) {
-      size = parseInt(sizeMatch[1].replace(/,/g, ''));
-    }
-    
-    sql = `SELECT * FROM properties WHERE lotarea > ${size}`;
-    explanation = `I found properties with lot size greater than ${size.toLocaleString()} square feet.`;
-    sql += " ORDER BY lotarea DESC";
-  }
-  // Generic handler for zip code queries if no other patterns match
-  else if (zipCode) {
-    sql = `SELECT * FROM properties WHERE zipcode = '${zipCode}'`;
-    explanation = `I found properties in zip code ${zipCode}`;
-  }
-  else {
-    // Default query
-    sql = `SELECT * FROM properties LIMIT 100`;
-    explanation = "I performed a basic property search.";
-    
-    // Try to extract keywords
-    if (query.match(/\w+/)) {
-      const keywords = query.match(/\w+/g);
-      if (keywords) {
-        explanation = `I searched for properties matching your query about: ${keywords.join(", ")}.`;
+      const size = parseInt(sizeMatch[1]?.replace(/,/g, '') || sizeMatch[2]?.replace(/,/g, '') || '0');
+      if (size > 0) {
+        sql += ` AND lotarea > ${size}`;
+        explanation += ` I filtered for lots larger than ${size.toLocaleString()} square feet.`;
       }
     }
+    
+    sql += " ORDER BY lotarea DESC";
+  }
+  // Handle value-based queries
+  else if (query_lower.includes("value") || query_lower.includes("investment")) {
+    sql = `${baseSelect} FROM properties WHERE assesstot > 0`;
+    explanation = "I searched for properties with investment potential based on assessed values.";
+    sql += " ORDER BY assesstot DESC";
+  }
+  // Default general search
+  else {
+    sql = `${baseSelect} FROM properties WHERE assesstot > 0`;
+    explanation = "I performed a general property search.";
+    sql += " ORDER BY assesstot DESC";
   }
   
   // Add borough filter if detected
@@ -371,226 +188,195 @@ function fallbackTranslation(query: string, reason = "unknown") {
     sql = sql.includes("WHERE") 
       ? sql.replace("WHERE", `WHERE borough = '${borough}' AND`) 
       : `${sql} WHERE borough = '${borough}'`;
-    explanation = explanation.replace("I found", `I found ${getBoroughName(borough)}`);
+    explanation = explanation.replace("I searched", `I searched in ${getBoroughName(borough)}`);
   }
   
-  // Add zoning district filter if detected
-  if (zoningDistrict) {
-    sql = sql.includes("WHERE") 
-      ? sql.replace("WHERE", `WHERE zonedist1 LIKE '${zoningDistrict}%' AND`) 
-      : `${sql} WHERE zonedist1 LIKE '${zoningDistrict}%'`;
-    explanation += ` in ${zoningDistrict} zoning districts`;
-  }
+  // Always add limit for performance
+  sql += " LIMIT 50";
   
-  // Add zip code filter if present and not already added
-  if (zipCode && !sql.includes("zipcode =")) {
-    sql = sql.includes("WHERE") 
-      ? sql.replace("WHERE", `WHERE zipcode = '${zipCode}' AND`) 
-      : `${sql} WHERE zipcode = '${zipCode}'`;
-    explanation += ` in zip code ${zipCode}`;
-  }
-  
-  // Add limit
-  if (!sql.includes("LIMIT")) {
-    sql += " LIMIT 100";
-  }
-  
-  return {
-    sql,
-    explanation
+  return { sql, explanation };
+}
+
+function getBoroughName(code: string): string {
+  const mapping = {
+    'MN': 'Manhattan',
+    'BK': 'Brooklyn', 
+    'BX': 'the Bronx',
+    'QN': 'Queens',
+    'SI': 'Staten Island'
   };
+  return mapping[code] || code;
 }
 
 serve(async (req) => {
-  // Handle CORS preflight
-  if (req.method === "OPTIONS") {
-    console.log("Handling CORS preflight request");
-    return new Response(null, {
-      headers: {
-        ...corsHeaders,
-        "Access-Control-Max-Age": "86400"
-      }
-    });
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders });
   }
-  
+
   try {
-    // Create Supabase client
-    console.log("Creating Supabase client");
-    const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-    const supabaseKey = Deno.env.get("SUPABASE_ANON_KEY") || "";
-    const claudeApiKey = Deno.env.get("CLAUDE_API_KEY");
+    const { query, userId } = await req.json();
     
-    console.log("Environment variables check:");
-    console.log("- Supabase URL:", supabaseUrl ? "Present" : "Missing");
-    console.log("- Supabase Key:", supabaseKey ? "Present" : "Missing");
-    console.log("- Claude API Key:", claudeApiKey ? "Present" : "Missing");
-    
-    if (!supabaseUrl || !supabaseKey) {
-      return new Response(JSON.stringify({
-        error: "Missing Supabase credentials"
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 500
-      });
-    }
-    
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    
-    // Parse request
-    console.log("Parsing request body");
-    let requestBody;
-    try {
-      requestBody = await req.json();
-      console.log("Request parsed successfully:", JSON.stringify(requestBody).substring(0, 200));
-    } catch (parseError) {
-      console.error("Error parsing request:", parseError.message);
-      return new Response(JSON.stringify({
-        error: `Request parsing error: ${parseError.message}`
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 400
-      });
-    }
-    
-    const { query, userId } = requestBody;
-    if (!query || typeof query !== "string") {
-      return new Response(JSON.stringify({
-        error: "Invalid query parameter"
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 400
-      });
-    }
-    
-    // Translate natural language to SQL
-    console.log("Translating query to SQL:", query);
-    let translationResult;
-    try {
-      translationResult = await translateNaturalLanguageToSQL(query);
-      console.log("Translation result generated:", JSON.stringify(translationResult).substring(0, 200));
-    } catch (translationError) {
-      console.error("Translation error:", translationError.message);
-      return new Response(JSON.stringify({
-        error: `Translation error: ${translationError.message}`
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 500
-      });
-    }
-    
-    const { sql, explanation } = translationResult;
-    
-    // Validate SQL to ensure it's not dangerous
-    if (!sql.toLowerCase().includes('select')) {
-      return new Response(JSON.stringify({
-        error: "Invalid SQL query: must be a SELECT statement",
-        sql
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 400
-      });
-    }
-    
-    // Execute the query using the database function
-    console.log("Executing SQL:", sql);
-    let queryResult;
-    try {
-      queryResult = await supabase.rpc('execute_dynamic_query', {
-        query_sql: sql
-      });
-      
-      console.log("Query execution result status:", queryResult.error ? "Error" : "Success");
-      if (queryResult.error) {
-        console.error("Query execution error:", queryResult.error.message);
-      } else {
-        console.log("Data received from database function, count:", queryResult.data?.length || 0);
-      }
-    } catch (queryError) {
-      console.error("RPC execution error:", queryError.message);
-      return new Response(JSON.stringify({
-        error: `RPC execution error: ${queryError.message}`,
-        sql
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 500
-      });
-    }
-    
-    const { data, error } = queryResult;
-    if (error) {
-      return new Response(JSON.stringify({
-        error: `Query execution error: ${error.message}`,
-        sql
-      }), {
-        headers: {
-          "Content-Type": "application/json",
-          ...corsHeaders
-        },
-        status: 500
-      });
-    }
-    
-    // Save search if user is logged in
-    if (userId) {
-      try {
-        console.log("Saving search for user:", userId);
-        const saveResult = await supabase.from('saved_searches').insert({
-          user_id: userId,
-          name: query.substring(0, 50) + (query.length > 50 ? '...' : ''),
-          query_type: 'nlp',
-          nlp_query: query,
-          processed_sql: sql
-        });
-        if (saveResult.error) {
-          console.error("Error saving search:", saveResult.error.message);
+    if (!query) {
+      return new Response(
+        JSON.stringify({ error: 'Query parameter is required' }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' }
         }
+      );
+    }
+
+    console.log(`Processing NLP query: "${query}" for user: ${userId || 'anonymous'}`);
+
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+    let result;
+    
+    try {
+      // Try Claude API first
+      const openaiApiKey = Deno.env.get('OPENAI_API_KEY');
+      if (!openaiApiKey) {
+        throw new Error('OpenAI API key not configured');
+      }
+
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': openaiApiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: 'claude-3-sonnet-20240229',
+          max_tokens: 1000,
+          messages: [
+            {
+              role: 'system',
+              content: systemPrompt
+            },
+            {
+              role: 'user', 
+              content: `Convert this natural language query to SQL: "${query}"`
+            }
+          ]
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Claude API error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      const content = data.content[0]?.text;
+      
+      if (!content) {
+        throw new Error('No content in Claude response');
+      }
+
+      // Extract JSON from Claude's response
+      const jsonMatch = content.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        throw new Error('No JSON found in Claude response');
+      }
+
+      result = JSON.parse(jsonMatch[0]);
+      console.log('Claude API successful, generated SQL:', result.sql);
+
+    } catch (claudeError) {
+      console.log('Claude API failed, using fallback:', claudeError.message);
+      result = fallbackTranslation(query, claudeError.message);
+    }
+
+    // Validate and execute the SQL query
+    if (!result.sql) {
+      throw new Error('No SQL query generated');
+    }
+
+    // Execute the query through Supabase
+    const { data: queryData, error: queryError } = await supabase
+      .rpc('execute_dynamic_query', { query_sql: result.sql });
+
+    if (queryError) {
+      console.error('Query execution error:', queryError);
+      
+      // If we get a timeout, try a simplified version
+      if (queryError.message.includes('timeout') || queryError.message.includes('canceling statement')) {
+        console.log('Query timed out, trying simplified version...');
+        
+        // Create a simplified version of the query
+        const simplifiedResult = fallbackTranslation(query, 'timeout - using simplified query');
+        
+        const { data: retryData, error: retryError } = await supabase
+          .rpc('execute_dynamic_query', { query_sql: simplifiedResult.sql });
+          
+        if (retryError) {
+          throw new Error(`Simplified query also failed: ${retryError.message}`);
+        }
+        
+        return new Response(
+          JSON.stringify({
+            data: retryData || [],
+            count: retryData?.length || 0,
+            sql: simplifiedResult.sql,
+            explanation: simplifiedResult.explanation + " (Note: Used simplified query due to performance constraints)",
+            source: 'fallback_timeout'
+          }),
+          { 
+            status: 200,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+          }
+        );
+      }
+      
+      throw new Error(`Query execution error: ${queryError.message}`);
+    }
+
+    // Save successful query if userId provided
+    if (userId && result.sql) {
+      try {
+        await supabase
+          .from('saved_searches')
+          .insert({
+            user_id: userId,
+            query_text: query,
+            sql_query: result.sql,
+            result_count: queryData?.length || 0
+          });
       } catch (saveError) {
-        console.error("Error during save operation:", saveError.message);
-        // Don't return an error here - just log it and continue
+        console.log('Failed to save search:', saveError);
+        // Don't fail the request if saving fails
       }
     }
-    
-    console.log("Successfully completed request. Returning results.");
-    return new Response(JSON.stringify({
-      results: data || [],
-      count: Array.isArray(data) ? data.length : 0,
-      explanation,
-      sql
-    }), {
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders
+
+    return new Response(
+      JSON.stringify({
+        data: queryData || [],
+        count: queryData?.length || 0,
+        sql: result.sql,
+        explanation: result.explanation,
+        source: 'claude_api'
+      }),
+      { 
+        status: 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       }
-    });
-    
+    );
+
   } catch (error) {
-    console.error("Server error:", error.message);
-    return new Response(JSON.stringify({
-      error: `Server error: ${error.message}`
-    }), {
-      headers: {
-        "Content-Type": "application/json",
-        ...corsHeaders
-      },
-      status: 500
-    });
+    console.error('Edge Function error:', error);
+    
+    return new Response(
+      JSON.stringify({ 
+        error: error.message,
+        sql: null
+      }),
+      { 
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+      }
+    );
   }
 });
