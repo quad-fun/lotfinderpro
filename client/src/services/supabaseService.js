@@ -246,4 +246,23 @@ const getDashboardStatsFallbackImproved = async () => {
       }
     ];
   }
+export const getOpportunityTypes = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('opportunity_types')
+      .select('*')
+      .order('id', { ascending: true });
+    
+    if (error) {
+      console.error('Error fetching opportunity types:', error);
+      throw new Error(error.message);
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('getOpportunityTypes error:', error);
+    throw error;
+  }
 };
+};
+

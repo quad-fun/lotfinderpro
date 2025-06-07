@@ -17,25 +17,80 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  Autocomplete,
   Grid,
   Divider,
-  Chip,
-  Tooltip,
   CircularProgress,
   Alert
 } from '@mui/material';
 import { 
   FaTrash, 
   FaSearch, 
-  FaChartBar, 
   FaFileCsv 
 } from 'react-icons/fa';
-import { useQuery } from 'react-query';
 
-// Import services and utils
-import { getPropertyById, searchPropertiesByBbl } from '../services/supabaseService';
-import { exportPropertiesToCSV } from '../utils/exportUtils';
+// Import only the functions we know exist
+import { getPropertyById } from '../services/supabaseService';
+
+// Simple BBL search function using direct Supabase query
+const searchPropertiesByBbl = async (bbl) => {
+  try {
+    const response = await fetch(`${process.env.REACT_APP_SUPABASE_URL}/rest/v1/properties?bbl=eq.${bbl}&limit=10`, {
+      headers: {
+        'apikey': process.env.REACT_APP_SUPABASE_ANON_KEY,
+        'Authorization': `Bearer ${process.env.REACT_APP_SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    if (!response.ok) {
+      throw new Error('Failed to search properties');
+    }
+    
+    return await response.json();
+  } catch (error) {
+    console.error('BBL search error:', error);
+    return [];
+  }
+};
+
+// Simple CSV export function
+const exportPropertiesToCSV = (properties, filename) => {
+  if (!properties || properties.length === 0) return;
+  
+  try {
+    // Get all unique keys from all properties
+    const allKeys = [...new Set(properties.flatMap(p => Object.keys(p)))];
+    
+    // Create CSV content
+    const headers = allKeys.join(',');
+    const rows = properties.map(property => 
+      allKeys.map(key => {
+        const value = property[key];
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'string') return `"${value.replace(/"/g, '""')}"`;
+        return value;
+      }).join(',')
+    );
+    
+    const csvContent = [headers, ...rows].join('\n');
+    
+    // Download the CSV
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    if (link.download !== undefined) {
+      const url = URL.createObjectURL(blob);
+      link.setAttribute('href', url);
+      link.setAttribute('download', `${filename}.csv`);
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  } catch (error) {
+    console.error('CSV export error:', error);
+    alert('Failed to export CSV');
+  }
+};
 
 // Format currency values
 const formatCurrency = (value) => {
@@ -108,9 +163,8 @@ function PropertyComparison({ initialProperties = [] }) {
       
       if (!isNaN(bbl)) {
         const results = await searchPropertiesByBbl(bbl);
-        setSearchResults(results);
+        setSearchResults(results || []);
       } else {
-        // TODO: Implement address search when available
         setSearchError('Please enter a valid BBL number');
       }
     } catch (error) {
@@ -222,7 +276,7 @@ function PropertyComparison({ initialProperties = [] }) {
                 {properties.map((property) => (
                   <TableCell 
                     key={`lotarea-${property.id}`}
-                    sx={isBestValue('lotarea', property.lotarea) ? { backgroundColor: '#e8f5e9' } : {}}
+                    sx={isBestValue('lotarea', property.lotarea) ? { backgroundColor: '#e8f5e8' } : {}}
                   >
                     {formatNumber(property.lotarea)}
                   </TableCell>
@@ -234,29 +288,17 @@ function PropertyComparison({ initialProperties = [] }) {
                 {properties.map((property) => (
                   <TableCell 
                     key={`bldgarea-${property.id}`}
-                    sx={isBestValue('bldgarea', property.bldgarea) ? { backgroundColor: '#e8f5e9' } : {}}
+                    sx={isBestValue('bldgarea', property.bldgarea) ? { backgroundColor: '#e8f5e8' } : {}}
                   >
                     {formatNumber(property.bldgarea)}
                   </TableCell>
                 ))}
               </TableRow>
               
-              <TableRow>
-                <TableCell>Year Built</TableCell>
-                {properties.map((property) => (
-                  <TableCell 
-                    key={`yearbuilt-${property.id}`}
-                    sx={isBestValue('yearbuilt', property.yearbuilt) ? { backgroundColor: '#e8f5e9' } : {}}
-                  >
-                    {property.yearbuilt || 'N/A'}
-                  </TableCell>
-                ))}
-              </TableRow>
-              
-              {/* Financial Information */}
+              {/* Assessment Values */}
               <TableRow>
                 <TableCell colSpan={properties.length + 1} sx={{ backgroundColor: '#f5f5f5' }}>
-                  <Typography variant="subtitle1"><strong>Financial Information</strong></Typography>
+                  <Typography variant="subtitle1"><strong>Assessment Values</strong></Typography>
                 </TableCell>
               </TableRow>
               
@@ -265,7 +307,7 @@ function PropertyComparison({ initialProperties = [] }) {
                 {properties.map((property) => (
                   <TableCell 
                     key={`assessland-${property.id}`}
-                    sx={isBestValue('assessland', property.assessland, false) ? { backgroundColor: '#e8f5e9' } : {}}
+                    sx={isBestValue('assessland', property.assessland) ? { backgroundColor: '#e8f5e8' } : {}}
                   >
                     {formatCurrency(property.assessland)}
                   </TableCell>
@@ -273,33 +315,15 @@ function PropertyComparison({ initialProperties = [] }) {
               </TableRow>
               
               <TableRow>
-                <TableCell>Total Value</TableCell>
+                <TableCell>Total Assessment</TableCell>
                 {properties.map((property) => (
                   <TableCell 
                     key={`assesstot-${property.id}`}
-                    sx={isBestValue('assesstot', property.assesstot, false) ? { backgroundColor: '#e8f5e9' } : {}}
+                    sx={isBestValue('assesstot', property.assesstot) ? { backgroundColor: '#e8f5e8' } : {}}
                   >
                     {formatCurrency(property.assesstot)}
                   </TableCell>
                 ))}
-              </TableRow>
-              
-              <TableRow>
-                <TableCell>Value per Sq Ft</TableCell>
-                {properties.map((property) => {
-                  const valuePerSqFt = property.lotarea && property.assesstot 
-                    ? property.assesstot / property.lotarea 
-                    : null;
-                  
-                  return (
-                    <TableCell 
-                      key={`valuepsf-${property.id}`}
-                      sx={isBestValue('assesstot', valuePerSqFt, false) ? { backgroundColor: '#e8f5e9' } : {}}
-                    >
-                      {valuePerSqFt ? formatCurrency(valuePerSqFt) : 'N/A'}
-                    </TableCell>
-                  );
-                })}
               </TableRow>
               
               {/* Development Metrics */}
@@ -313,43 +337,28 @@ function PropertyComparison({ initialProperties = [] }) {
                 <TableCell>Built FAR</TableCell>
                 {properties.map((property) => (
                   <TableCell key={`builtfar-${property.id}`}>
-                    {property.builtfar?.toFixed(2) || 'N/A'}
+                    {property.builtfar ? property.builtfar.toFixed(2) : 'N/A'}
                   </TableCell>
                 ))}
               </TableRow>
               
               <TableRow>
-                <TableCell>Maximum Residential FAR</TableCell>
+                <TableCell>Residential FAR</TableCell>
                 {properties.map((property) => (
-                  <TableCell 
-                    key={`residfar-${property.id}`}
-                    sx={isBestValue('residfar', property.residfar) ? { backgroundColor: '#e8f5e9' } : {}}
-                  >
-                    {property.residfar?.toFixed(2) || 'N/A'}
+                  <TableCell key={`residfar-${property.id}`}>
+                    {property.residfar ? property.residfar.toFixed(2) : 'N/A'}
                   </TableCell>
                 ))}
               </TableRow>
               
               <TableRow>
-                <TableCell>Development Potential (sq ft)</TableCell>
+                <TableCell>Development Potential</TableCell>
                 {properties.map((property) => (
                   <TableCell 
                     key={`devpot-${property.id}`}
-                    sx={isBestValue('development_potential', property.development_potential) ? { backgroundColor: '#e8f5e9' } : {}}
+                    sx={isBestValue('development_potential', property.development_potential) ? { backgroundColor: '#e8f5e8' } : {}}
                   >
                     {formatNumber(property.development_potential)}
-                  </TableCell>
-                ))}
-              </TableRow>
-              
-              <TableRow>
-                <TableCell>Land-to-Value Ratio</TableCell>
-                {properties.map((property) => (
-                  <TableCell 
-                    key={`valueratio-${property.id}`}
-                    sx={isBestValue('value_ratio', property.value_ratio) ? { backgroundColor: '#e8f5e9' } : {}}
-                  >
-                    {property.value_ratio?.toFixed(2) || 'N/A'}
                   </TableCell>
                 ))}
               </TableRow>
@@ -357,24 +366,28 @@ function PropertyComparison({ initialProperties = [] }) {
           </Table>
         </TableContainer>
       )}
-      
+
       {/* Add Property Dialog */}
       <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Add Property to Comparison</DialogTitle>
         <DialogContent>
-          <Box sx={{ mt: 1 }}>
+          <Box sx={{ pt: 2 }}>
             <TextField
-              label="Search by BBL"
               fullWidth
+              label="BBL Number"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Enter BBL (e.g., 1-00123-0045)"
+              placeholder="e.g., 1000123456"
+              onKeyPress={(e) => {
+                if (e.key === 'Enter') {
+                  handlePropertySearch();
+                }
+              }}
               InputProps={{
                 endAdornment: (
                   <Button
                     onClick={handlePropertySearch}
                     disabled={searchLoading}
-                    sx={{ ml: 1 }}
                   >
                     {searchLoading ? <CircularProgress size={24} /> : 'Search'}
                   </Button>
