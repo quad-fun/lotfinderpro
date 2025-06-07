@@ -1,4 +1,4 @@
-// client/src/components/PropertyTable.jsx - Remove problematic import
+// client/src/components/PropertyTable.jsx - Fixed hooks order
 import React, { useMemo, useState } from 'react';
 import { useTable, usePagination, useSortBy } from 'react-table';
 import { 
@@ -9,18 +9,7 @@ import {
 import { FaEye, FaStar, FaRegStar } from 'react-icons/fa';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-
-// Simple favorite function to replace the missing import
-const saveFavoriteProperty = async (userId, propertyId, notes = '') => {
-  try {
-    console.log('Would save favorite property:', { userId, propertyId, notes });
-    // Placeholder implementation
-    return { success: true };
-  } catch (error) {
-    console.error('Error saving favorite:', error);
-    throw error;
-  }
-};
+import { saveFavoriteProperty } from '../services/supabaseService';
 
 // Format currency values
 const formatCurrency = (value) => {
@@ -50,40 +39,9 @@ function PropertyTable({
   const { user } = useAuth();
   const [favorites, setFavorites] = useState({});
 
-  // Add debugging
-  console.log('PropertyTable received props:', {
-    propertiesLength: properties?.length,
-    properties: properties,
-    page,
-    pageSize,
-    totalCount
-  });
+  // HOOKS MUST BE CALLED FIRST - BEFORE ANY EARLY RETURNS
   
-  // Check if properties is actually an array
-  if (!Array.isArray(properties)) {
-    console.error('PropertyTable: properties is not an array:', typeof properties, properties);
-    return (
-      <Paper sx={{ p: 3, textAlign: 'center' }}>
-        <Typography variant="body1" color="error">
-          Error: Invalid properties data received
-        </Typography>
-      </Paper>
-    );
-  }
-  
-  // Check if properties array is empty
-  if (properties.length === 0) {
-    console.log('PropertyTable: No properties to display');
-    return (
-      <Paper sx={{ p: 3, textAlign: 'center' }}>
-        <Typography variant="body1" color="text.secondary">
-          No properties found matching your search criteria.
-        </Typography>
-      </Paper>
-    );
-  }
-
-  // Toggle favorite status
+  // Toggle favorite status function
   const toggleFavorite = async (propertyId) => {
     if (!user) {
       alert('Please log in to save favorites');
@@ -109,7 +67,7 @@ function PropertyTable({
     }
   };
 
-  // Define columns
+  // Define columns with useMemo
   const columns = useMemo(() => [
     {
       Header: 'BBL',
@@ -198,7 +156,7 @@ function PropertyTable({
   } = useTable(
     {
       columns,
-      data: properties,
+      data: Array.isArray(properties) ? properties : [],
       manualPagination: true,
       pageCount: Math.ceil(totalCount / pageSize),
       manualSortBy: true,
@@ -218,15 +176,47 @@ function PropertyTable({
     onPageSizeChange(newPageSize);
   };
 
+  // NOW DO VALIDATION CHECKS AFTER ALL HOOKS
+  console.log('PropertyTable received props:', {
+    propertiesLength: properties?.length,
+    page,
+    pageSize,
+    totalCount
+  });
+  
+  // Check if properties is actually an array
+  if (!Array.isArray(properties)) {
+    console.error('PropertyTable: properties is not an array:', typeof properties, properties);
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography variant="body1" color="error">
+          Error: Invalid properties data received
+        </Typography>
+      </Paper>
+    );
+  }
+  
+  // Check if properties array is empty
+  if (properties.length === 0) {
+    console.log('PropertyTable: No properties to display');
+    return (
+      <Paper sx={{ p: 3, textAlign: 'center' }}>
+        <Typography variant="body1" color="text.secondary">
+          No properties found matching your search criteria.
+        </Typography>
+      </Paper>
+    );
+  }
+
   return (
     <Paper>
       <TableContainer>
         <Table {...getTableProps()}>
           <TableHead>
-            {headerGroups.map(headerGroup => (
-              <TableRow {...headerGroup.getHeaderGroupProps()}>
-                {headerGroup.headers.map(column => (
-                  <TableCell {...column.getHeaderProps(column.getSortByToggleProps())}>
+            {headerGroups.map((headerGroup, headerIndex) => (
+              <TableRow {...headerGroup.getHeaderGroupProps()} key={headerIndex}>
+                {headerGroup.headers.map((column, columnIndex) => (
+                  <TableCell {...column.getHeaderProps(column.getSortByToggleProps())} key={columnIndex}>
                     {column.render('Header')}
                     {column.isSorted ? (
                       <TableSortLabel
@@ -240,12 +230,12 @@ function PropertyTable({
             ))}
           </TableHead>
           <TableBody {...getTableBodyProps()}>
-            {tablePage.map(row => {
+            {tablePage.map((row, rowIndex) => {
               prepareRow(row);
               return (
-                <TableRow {...row.getRowProps()}>
-                  {row.cells.map(cell => (
-                    <TableCell {...cell.getCellProps()}>
+                <TableRow {...row.getRowProps()} key={rowIndex}>
+                  {row.cells.map((cell, cellIndex) => (
+                    <TableCell {...cell.getCellProps()} key={cellIndex}>
                       {cell.render('Cell')}
                     </TableCell>
                   ))}

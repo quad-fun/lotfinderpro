@@ -312,7 +312,19 @@ export const searchPropertiesByAddress = async (address, limit = 10) => {
              ELSE NULL 
         END AS value_ratio
       `)
-
+      .ilike('address', `%${address}%`)
+      .limit(limit);
+    
+    if (error) {
+      throw new Error(error.message);
+    }
+    
+    return data || [];
+  } catch (error) {
+    console.error('Search properties by address error:', error);
+    return [];
+  }
+};
 
 export const getPropertyById = async (id) => {
   try {
