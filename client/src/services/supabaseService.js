@@ -325,6 +325,37 @@ export const searchPropertiesByAddress = async (address, limit = 10) => {
     return [];
   }
 };
+export const performNlpQuery = async (query, userId) => {
+  try {
+    console.log('🚀 Calling nlp-query Edge Function with:', { query, userId });
+    
+    const { data, error } = await supabase.functions.invoke('nlp-query', {
+      body: { query, userId }
+    });
+    
+    console.log('🔧 Raw supabase.functions.invoke response:');
+    console.log('  - data:', data);
+    console.log('  - error:', error);
+    console.log('  - data type:', typeof data);
+    console.log('  - data.data type:', typeof data?.data);
+    console.log('  - data.data length:', data?.data?.length);
+    
+    if (data?.data?.length > 0) {
+      console.log('🏠 First property from Edge Function:', data.data[0]);
+      console.log('🔑 Keys in first property:', Object.keys(data.data[0]));
+    }
+    
+    if (error) {
+      console.error('❌ Edge Function error:', error);
+      throw new Error(error.message);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('💥 performNlpQuery error:', error);
+    throw error;
+  }
+};
 
 export const getPropertyById = async (id) => {
   try {
@@ -603,20 +634,32 @@ export const executeTemplateQuery = async ({ templateId, parameters }) => {
 
 export const performNlpQuery = async (query, userId) => {
   try {
-    console.log('Calling nlp-query Edge Function with:', { query, userId });
+    console.log('🚀 Calling nlp-query Edge Function with:', { query, userId });
     
     const { data, error } = await supabase.functions.invoke('nlp-query', {
       body: { query, userId }
     });
     
+    console.log('🔧 Raw supabase.functions.invoke response:');
+    console.log('  - data:', data);
+    console.log('  - error:', error);
+    console.log('  - data type:', typeof data);
+    console.log('  - data.data type:', typeof data?.data);
+    console.log('  - data.data length:', data?.data?.length);
+    
+    if (data?.data?.length > 0) {
+      console.log('🏠 First property from Edge Function:', data.data[0]);
+      console.log('🔑 Keys in first property:', Object.keys(data.data[0]));
+    }
+    
     if (error) {
-      console.error('NLP query error:', error);
+      console.error('❌ Edge Function error:', error);
       throw new Error(error.message);
     }
     
     return data;
   } catch (error) {
-    console.error('Perform NLP query error:', error);
+    console.error('💥 performNlpQuery error:', error);
     throw error;
   }
 };
