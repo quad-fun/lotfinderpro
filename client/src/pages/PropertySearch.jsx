@@ -173,6 +173,31 @@ function PropertySearch() {
       const data = result.data || [];
       console.log('Data received:', data.length, 'properties');
       
+      // 🔍 ADD THIS DETAILED DEBUGGING
+      if (data.length > 0) {
+        console.log('🏠 First property detailed structure:', data[0]);
+        console.log('🔑 All keys in first property:', Object.keys(data[0]));
+        console.log('📊 Property field types and values:');
+        Object.entries(data[0]).forEach(([key, value]) => {
+          console.log(`  ${key}: ${value} (${typeof value})`);
+        });
+        
+        // Check a few more properties
+        console.log('🏠 Second property sample fields:', {
+          bbl: data[1]?.bbl,
+          address: data[1]?.address,
+          borough: data[1]?.borough,
+          lotarea: data[1]?.lotarea
+        });
+        
+        console.log('🏠 Third property sample fields:', {
+          bbl: data[2]?.bbl,
+          address: data[2]?.address,
+          borough: data[2]?.borough,
+          lotarea: data[2]?.lotarea
+        });
+      }
+      
       // Set search results with proper structure
       const searchResultsData = {
         data: data,
@@ -188,7 +213,6 @@ function PropertySearch() {
       console.log('Setting search results:', searchResultsData);
       setSearchResults(searchResultsData);
       
-      // Show success notification
       setNotification({ 
         open: true, 
         message: `Found ${data.length} properties matching your search`, 
@@ -198,7 +222,6 @@ function PropertySearch() {
     } catch (error) {
       console.error('NLP search error:', error);
       
-      // Set error state but still show empty results structure
       setSearchResults({
         data: [],
         count: 0,
@@ -208,7 +231,7 @@ function PropertySearch() {
         sql: null
       });
       
-      throw error; // Re-throw to be caught by handleNlpSearch
+      throw error;
       
     } finally {
       setIsSearching(false);
