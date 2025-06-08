@@ -24,6 +24,7 @@ import { FaMagic, FaSearch, FaFilter, FaSave, FaMapMarkedAlt, FaTable } from 're
 // Custom components
 import PropertyTable from '../components/PropertyTable';
 import PropertyMap from '../components/PropertyMap';
+import MapSearchIntegration from '../components/MapSearchIntegration';
 import QueryTemplateForm from '../components/QueryTemplateForm';
 import ExportMenu from '../components/ExportMenu';
 
@@ -317,6 +318,34 @@ function PropertySearch() {
   const handlePageSizeChange = (newPageSize) => {
     setPageSize(newPageSize);
     setCurrentPage(0); // Reset to first page
+  };
+
+  // Handle map location selection
+  const handleLocationSelect = (location) => {
+    console.log('Map location selected:', location);
+    setNotification({ 
+      open: true, 
+      message: `Centered map on ${location.name}`, 
+      type: 'info' 
+    });
+  };
+
+  // Handle property search from map
+  const handleMapPropertySearch = (properties, query) => {
+    setSearchResults({
+      data: properties,
+      count: properties.length,
+      searchType: 'map_search',
+      explanation: `Map search results for: ${query}`,
+      page: 0,
+      pageSize: properties.length
+    });
+    
+    setNotification({ 
+      open: true, 
+      message: `Found ${properties.length} properties from map search`, 
+      type: 'success' 
+    });
   };
 
   // Close notification
@@ -656,7 +685,20 @@ function PropertySearch() {
                 onPageSizeChange={handlePageSizeChange}
               />
             ) : (
-              <PropertyMap properties={searchResults.data} />
+              <Box>
+                {/* Map Search Integration */}
+                <MapSearchIntegration
+                  onLocationSelect={handleLocationSelect}
+                  onPropertySearch={handleMapPropertySearch}
+                />
+                
+                {/* Enhanced Property Map */}
+                <PropertyMap 
+                  properties={searchResults.data}
+                  height="600px"
+                  showControls={true}
+                />
+              </Box>
             )
           ) : (
             <Paper sx={{ p: 3, textAlign: 'center' }}>
