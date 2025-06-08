@@ -208,6 +208,8 @@ function getBoroughName(code: string): string {
   return mapping[code] || code;
 }
 
+// supabase/functions/nlp-query/index.ts - Updated serve function
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -316,10 +318,13 @@ serve(async (req) => {
           throw new Error(`Simplified query also failed: ${retryError.message}`);
         }
         
+        // 🔧 FIX: Unwrap the retry data too
+        const unwrappedRetryData = retryData?.map(item => item.result || item) || [];
+        
         return new Response(
           JSON.stringify({
-            data: retryData || [],
-            count: retryData?.length || 0,
+            data: unwrappedRetryData,
+            count: unwrappedRetryData?.length || 0,
             sql: simplifiedResult.sql,
             explanation: simplifiedResult.explanation + " (Note: Used simplified query due to performance constraints)",
             source: 'fallback_timeout'
@@ -334,6 +339,15 @@ serve(async (req) => {
       throw new Error(`Query execution error: ${queryError.message}`);
     }
 
+    // 🔧 FIX: Unwrap the 'result' objects from the RPC response
+    const unwrappedData = queryData?.map(item => {
+      // If the item has a 'result' property, return that; otherwise return the item as-is
+      return item.result || item;
+    }) || [];
+
+    console.log('🔧 Unwrapped data sample:', unwrappedData[0]);
+    console.log('🔧 Unwrapped data length:', unwrappedData.length);
+
     // Save successful query if userId provided
     if (userId && result.sql) {
       try {
@@ -343,7 +357,7 @@ serve(async (req) => {
             user_id: userId,
             query_text: query,
             sql_query: result.sql,
-            result_count: queryData?.length || 0
+            result_count: unwrappedData?.length || 0  // Use unwrapped length
           });
       } catch (saveError) {
         console.log('Failed to save search:', saveError);
@@ -353,8 +367,8 @@ serve(async (req) => {
 
     return new Response(
       JSON.stringify({
-        data: queryData || [],
-        count: queryData?.length || 0,
+        data: unwrappedData,  // 🔧 Use unwrapped data instead of queryData
+        count: unwrappedData?.length || 0,  // 🔧 Use unwrapped length
         sql: result.sql,
         explanation: result.explanation,
         source: 'claude_api'
